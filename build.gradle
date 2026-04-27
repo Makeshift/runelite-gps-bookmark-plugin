@@ -79,3 +79,5 @@ tasks.register('shadowJar', Jar) {
 	archiveClassifier.set('shadow')
 	archiveFileName.set("${rootProject.name}-${project.version}-all.jar")
 }
+
+apply from: 'gradle/poi-dump.gradle'
