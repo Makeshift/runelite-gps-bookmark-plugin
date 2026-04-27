@@ -74,13 +74,14 @@ public final class PoiDumper
 		Path configDir = Paths.get(required(opts, "--config-dir"));
 		Path cacheRoot = Paths.get(required(opts, "--cache-root"));
 		String cacheIdOverride = opts.get("--openrs2-cache-id");
+		boolean haveOverride = cacheIdOverride != null && !cacheIdOverride.isEmpty();
 
 		List<Path> configFiles = listConfigs(configDir);
 
-		String cacheId = cacheIdOverride != null && !cacheIdOverride.isEmpty()
+		String cacheId = haveOverride
 			? cacheIdOverride
 			: Openrs2CacheFetcher.resolveLatestCacheId();
-		if (cacheIdOverride != null && !cacheIdOverride.isEmpty())
+		if (haveOverride)
 		{
 			System.out.println("Using openrs2 cache id " + cacheId + " (override)");
 		}
