@@ -103,18 +103,16 @@ class GpsBookmarkPanel extends PluginPanel
 		final JPanel buttons = new JPanel(new GridLayout(1, 3, 4, 0));
 		buttons.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
-		final JButton navigate = new JButton("Navigate");
-		navigate.setToolTipText("Send this location to the Shortest Path plugin");
+		// Compact icon buttons (Unicode glyphs) — full descriptions live in the tooltips.
+		final JButton navigate = createIconButton("\u27A4", "Navigate to this bookmark via the Shortest Path plugin");
 		navigate.addActionListener(e -> plugin.navigateTo(bookmark));
 		buttons.add(navigate);
 
-		final JButton edit = new JButton("Edit");
-		edit.setToolTipText("Edit this bookmark");
+		final JButton edit = createIconButton("\u270E", "Edit this bookmark");
 		edit.addActionListener(e -> openEditDialog(bookmark));
 		buttons.add(edit);
 
-		final JButton delete = new JButton("Delete");
-		delete.setToolTipText("Delete this bookmark");
+		final JButton delete = createIconButton("\u2715", "Delete this bookmark");
 		delete.addActionListener(e ->
 		{
 			final int result = javax.swing.JOptionPane.showConfirmDialog(
@@ -132,6 +130,16 @@ class GpsBookmarkPanel extends PluginPanel
 
 		row.add(buttons, BorderLayout.CENTER);
 		return row;
+	}
+
+	private static JButton createIconButton(String glyph, String tooltip)
+	{
+		final JButton button = new JButton(glyph);
+		button.setToolTipText(tooltip);
+		button.setMargin(new java.awt.Insets(2, 4, 2, 4));
+		button.setFont(button.getFont().deriveFont(java.awt.Font.PLAIN, 14f));
+		button.setFocusPainted(false);
+		return button;
 	}
 
 	private static String buildTooltip(GpsBookmark bookmark)

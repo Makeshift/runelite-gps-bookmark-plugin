@@ -211,19 +211,26 @@ public class GpsBookmarkPlugin extends Plugin
 	 * Requests the Shortest Path plugin to draw a path to the given bookmark.
 	 * The starting point defaults to the player's current location (handled by
 	 * Shortest Path when {@code start} is omitted).
+	 *
+	 * <p>The event is posted on the client thread because {@code EventBus.post}
+	 * is synchronous: the subscriber (Shortest Path) reads the player's world
+	 * location, which asserts it is called on the client thread.</p>
 	 */
 	public void navigateTo(GpsBookmark bookmark)
 	{
 		final Map<String, Object> data = new HashMap<>();
 		data.put("target", bookmark.toWorldPoint());
-		eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_PATH, data));
+		clientThread.invokeLater(() ->
+			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_PATH, data)));
 	}
 
 	/**
 	 * Requests the Shortest Path plugin to clear any displayed path.
+	 * Posted on the client thread; see {@link #navigateTo(GpsBookmark)}.
 	 */
 	public void clearPath()
 	{
-		eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_CLEAR));
+		clientThread.invokeLater(() ->
+			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_CLEAR)));
 	}
 }
