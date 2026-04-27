@@ -4,14 +4,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * JSON-deserialized configuration for a single POI dump.
- *
- * <p>One config file produces one JSON output containing every object
- * placement in the OSRS cache that matches the configured name patterns
- * (and, optionally, exposes one of the configured menu actions). It is
- * the runtime analogue of the upstream
- * {@code shortest-path-tooling/BankTileDumperTest} — see that file for
- * the original design — but generalised to any POI category.
+ * JSON-deserialized configuration for a single POI dump. One config
+ * file produces one JSON output containing every object placement in
+ * the OSRS cache that matches the configured filters.
  */
 public class PoiDumpConfig
 {
@@ -32,19 +27,18 @@ public class PoiDumpConfig
 	public List<String> namePatterns = new ArrayList<>();
 
 	/**
-	 * If non-empty, an object that matched a name pattern must additionally
-	 * expose at least one menu op whose text equals (case-insensitively)
-	 * one of these actions. Mirrors the {@code hasBankAction} filter in the
-	 * upstream BankTileDumperTest, which is required to distinguish e.g.
-	 * decorative "Bank table" scenery from interactive Varlamore bank tables.
+	 * If non-empty, an object that matched a name pattern must
+	 * additionally expose at least one menu op whose text equals
+	 * (case-insensitively) one of these actions. Used to distinguish
+	 * interactive scenery (e.g. real bank tables) from decorative
+	 * objects of the same name.
 	 */
 	public List<String> requiredActions = new ArrayList<>();
 
 	/**
-	 * Object IDs always included regardless of name or action filter. Use
-	 * for interactive objects whose cache name is generic (e.g.
-	 * Culinaromancer's Chest is named "Chest") but which genuinely act as
-	 * the POI in-game.
+	 * Object IDs always included regardless of name or action filter.
+	 * Use for interactive objects whose cache name is generic (e.g.
+	 * Culinaromancer's Chest is named "Chest").
 	 */
 	public List<Integer> forceIncludeIds = new ArrayList<>();
 

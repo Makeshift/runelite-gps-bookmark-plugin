@@ -36,8 +36,7 @@ revision changes.
 
 * Pin a specific cache: `./gradlew jar -PpoiCacheId=2499`
 * Skip the dump entirely (offline builds): `./gradlew jar -PskipPoiDump=true`
-* Force a refresh of the openrs2 lookup: delete `build/poi-cache-id.txt`
-  (or use `--rerun-tasks`).
+* Force a refresh of the openrs2 lookup: `./gradlew dumpPois --rerun-tasks`
 
 To add a new POI category, drop a new `poi-configs/<name>.json` next to
 `banks.json`; it will be picked up automatically on the next build.

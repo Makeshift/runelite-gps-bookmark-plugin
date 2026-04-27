@@ -32,27 +32,24 @@ import net.runelite.cache.region.RegionLoader;
 import net.runelite.cache.util.XteaKeyManager;
 
 /**
- * Standalone CLI tool that scans an OSRS cache for object placements
- * matching a {@link PoiDumpConfig} and writes the result as JSON.
- *
- * <p>Modelled after upstream
- * <a href="https://github.com/osrs-pathfinding/shortest-path-tooling/blob/master/src/test/java/shortestpath/dump/BankTileDumperTest.java">BankTileDumperTest</a>,
- * but driven by an external JSON config so the same dumper can be reused
- * for banks, fairy rings, spirit trees, etc.
+ * Scans an OSRS cache for object placements matching one or more
+ * {@link PoiDumpConfig}s and writes each result as a JSON file under
+ * {@code --output-dir}.
  *
  * <p>Invocation:
  * <pre>
  *   java -cp ... com.gpsbookmark.dumper.PoiDumper \
- *       --config   path/to/config.json \
- *       --cache    path/to/cache-dir \
- *       --xtea     path/to/keys.json    (runelite format: region/keys) \
- *       --output   path/to/output.json \
- *       [--cache-revision openrs2-id]
+ *       --config-dir       poi-configs/ \
+ *       --cache-root       .poi-cache/ \
+ *       --output-dir       build/generated-resources/poi/ \
+ *       [--openrs2-cache-id 2499] \
+ *       [--skip]
  * </pre>
  *
- * <p>Designed to be invoked by the {@code dumpPois} Gradle task; the
- * downloaded cache, transformed XTEA file, and output paths are all
- * managed by Gradle.
+ * <p>Without {@code --openrs2-cache-id} the newest oldschool/live cache
+ * from <a href="https://archive.openrs2.org">archive.openrs2.org</a> is
+ * used; the cache is downloaded into {@code <cache-root>/<id>/} on first
+ * use and reused thereafter. {@code --skip} writes nothing and exits 0.
  */
 public final class PoiDumper
 {
@@ -64,29 +61,42 @@ public final class PoiDumper
 	public static void main(String[] args) throws IOException
 	{
 		Map<String, String> opts = parseArgs(args);
-		String configPath = required(opts, "--config");
-		String cacheDir = required(opts, "--cache");
-		String xteaPath = required(opts, "--xtea");
-		String outputPath = required(opts, "--output");
-		String cacheRevision = opts.getOrDefault("--cache-revision", "unknown");
 
-		PoiDumpConfig config = loadConfig(Paths.get(configPath));
-		validate(config, configPath);
+		Path outputDir = Paths.get(required(opts, "--output-dir"));
+		Files.createDirectories(outputDir);
 
-		Pattern[] namePatterns = compilePatterns(config.namePatterns);
-		Set<Integer> forceIncludeIds = new HashSet<>(config.forceIncludeIds);
-		Set<Integer> excludeIds = new HashSet<>(config.excludeIds);
-		Set<String> requiredActions = lowerCase(config.requiredActions);
+		if (opts.containsKey("--skip"))
+		{
+			System.out.println("POI dump skipped (--skip); no resources generated.");
+			return;
+		}
+
+		Path configDir = Paths.get(required(opts, "--config-dir"));
+		Path cacheRoot = Paths.get(required(opts, "--cache-root"));
+		String cacheIdOverride = opts.get("--openrs2-cache-id");
+
+		List<Path> configFiles = listConfigs(configDir);
+
+		String cacheId = cacheIdOverride != null && !cacheIdOverride.isEmpty()
+			? cacheIdOverride
+			: Openrs2CacheFetcher.resolveLatestCacheId();
+		if (cacheIdOverride != null && !cacheIdOverride.isEmpty())
+		{
+			System.out.println("Using openrs2 cache id " + cacheId + " (override)");
+		}
+
+		Path cacheHome = cacheRoot.resolve(cacheId);
+		Openrs2CacheFetcher.ensureDownloaded(cacheId, cacheHome);
+		File cacheDir = cacheHome.resolve("cache").toFile();
+		File xteaFile = cacheHome.resolve("keys.json").toFile();
 
 		XteaKeyManager xteaKeyManager = new XteaKeyManager();
-		try (FileInputStream fin = new FileInputStream(xteaPath))
+		try (FileInputStream fin = new FileInputStream(xteaFile))
 		{
 			xteaKeyManager.loadKeys(fin);
 		}
 
-		List<PoiObject> rows;
-		Set<Integer> matchingIds;
-		try (Store store = new Store(new File(cacheDir)))
+		try (Store store = new Store(cacheDir))
 		{
 			store.load();
 
@@ -96,15 +106,32 @@ public final class PoiDumper
 			regionLoader.loadRegions();
 			regionLoader.calculateBounds();
 
-			matchingIds = collectMatchingIds(objectManager, namePatterns, requiredActions,
-				forceIncludeIds, excludeIds);
-			System.out.println("[" + config.name + "] matched " + matchingIds.size()
-				+ " object definition(s)");
-
-			rows = collectPlacements(regionLoader, objectManager, matchingIds);
+			for (Path cfgPath : configFiles)
+			{
+				dumpOne(cfgPath, objectManager, regionLoader, outputDir, cacheId);
+			}
 		}
+	}
 
-		Path output = Paths.get(outputPath);
+	private static void dumpOne(Path cfgPath, ObjectManager objectManager,
+		RegionLoader regionLoader, Path outputDir, String cacheRevision) throws IOException
+	{
+		PoiDumpConfig config = loadConfig(cfgPath);
+		validate(config, cfgPath.toString());
+
+		Pattern[] namePatterns = compilePatterns(config.namePatterns);
+		Set<Integer> forceIncludeIds = new HashSet<>(config.forceIncludeIds);
+		Set<Integer> excludeIds = new HashSet<>(config.excludeIds);
+		Set<String> requiredActions = lowerCase(config.requiredActions);
+
+		Set<Integer> matchingIds = collectMatchingIds(objectManager, namePatterns, requiredActions,
+			forceIncludeIds, excludeIds);
+		System.out.println("[" + config.name + "] matched " + matchingIds.size()
+			+ " object definition(s)");
+
+		List<PoiObject> rows = collectPlacements(regionLoader, objectManager, matchingIds);
+
+		Path output = outputDir.resolve(config.outputResourcePath);
 		if (output.getParent() != null)
 		{
 			Files.createDirectories(output.getParent());
@@ -112,6 +139,27 @@ public final class PoiDumper
 		writeJson(config, cacheRevision, matchingIds.size(), rows, output);
 		System.out.println("[" + config.name + "] wrote " + rows.size()
 			+ " placement(s) to " + output.toAbsolutePath());
+	}
+
+	private static List<Path> listConfigs(Path configDir) throws IOException
+	{
+		if (!Files.isDirectory(configDir))
+		{
+			throw new IOException("Config dir does not exist: " + configDir);
+		}
+		List<Path> configs = new ArrayList<>();
+		try (java.util.stream.Stream<Path> stream = Files.list(configDir))
+		{
+			stream
+				.filter(p -> p.getFileName().toString().endsWith(".json"))
+				.sorted()
+				.forEach(configs::add);
+		}
+		if (configs.isEmpty())
+		{
+			throw new IOException("No POI configs (*.json) found in " + configDir);
+		}
+		return configs;
 	}
 
 	// --- Config & arg parsing -------------------------------------------
@@ -125,8 +173,7 @@ public final class PoiDumper
 			{
 				throw new IOException("Empty or invalid config: " + path);
 			}
-			// Gson leaves unset collections null; normalise so callers
-			// don't need null guards everywhere.
+			// Gson leaves unset collections null; normalise.
 			if (config.namePatterns == null) config.namePatterns = new ArrayList<>();
 			if (config.requiredActions == null) config.requiredActions = new ArrayList<>();
 			if (config.forceIncludeIds == null) config.forceIncludeIds = new ArrayList<>();
@@ -161,6 +208,12 @@ public final class PoiDumper
 			if (!a.startsWith("--"))
 			{
 				throw new IllegalArgumentException("Unexpected positional argument: " + a);
+			}
+			// Valueless flags.
+			if ("--skip".equals(a))
+			{
+				opts.put(a, "true");
+				continue;
 			}
 			if (i + 1 >= args.length)
 			{
@@ -317,9 +370,6 @@ public final class PoiDumper
 	private static void writeJson(PoiDumpConfig config, String cacheRevision, int matchedDefs,
 		List<PoiObject> rows, Path output) throws IOException
 	{
-		// Build manually so we can control the top-level shape and pin
-		// the schema version at the source rather than relying on a
-		// Gson-serialised wrapper class.
 		PoiDumpResult result = new PoiDumpResult();
 		result.name = config.name;
 		result.schemaVersion = 1;
@@ -354,10 +404,7 @@ public final class PoiDumper
 		List<PoiObject> objects;
 	}
 
-	/**
-	 * One placement of a matched object in the world. Mirrors the columns
-	 * of the upstream BankTileDumperTest TSV but in JSON.
-	 */
+	/** One placement of a matched object in the world. */
 	@SuppressWarnings("unused") // fields read reflectively by Gson
 	static final class PoiObject
 	{

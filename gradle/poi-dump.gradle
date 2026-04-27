@@ -1,32 +1,17 @@
-// --- POI cache dumper ------------------------------------------------------
-//
-// Downloads the latest live OSRS cache (and XTEA keys) from the openrs2
-// archive into a gitignored directory in the repo root, then runs
-// com.gpsbookmark.dumper.PoiDumper once per JSON config in poi-configs/
-// to produce JSON resources that are embedded in the plugin jar.
-//
-// Wired into the build via processResources so a plain `./gradlew jar`
-// transparently downloads (or reuses) the cache and regenerates the
-// embedded POI lists when the config or cache revision changes.
-//
-// Override the cache revision with -PoiCacheId=<openrs2 cache id>; by
-// default the task auto-discovers the newest oldschool/live entry in
-// https://archive.openrs2.org/caches.json.
-//
-// Skip the download/dump entirely (e.g. for fully-offline builds) with
-// -PskipPoiDump=true. In that case the embedded JSON is whatever exists
-// from a prior dump, or empty if there is none.
+// Runs com.gpsbookmark.dumper.PoiDumper at build time over every JSON
+// config in poi-configs/, embedding the resulting JSON files in the
+// plugin jar via processResources. Override the cache revision with
+// -PpoiCacheId=<openrs2 cache id>; skip the dump entirely with
+// -PskipPoiDump=true.
 
-import groovy.json.JsonSlurper
+def poiCacheRoot    = layout.projectDirectory.dir('.poi-cache')
+def poiConfigsDir   = layout.projectDirectory.dir('poi-configs')
+def poiGeneratedDir = layout.buildDirectory.dir('generated-resources/poi')
+def poiSkip         = providers.gradleProperty('skipPoiDump').orElse('false').map { it.toBoolean() }
+def poiCacheIdProp  = providers.gradleProperty('poiCacheId').orElse('')
 
-def poiCacheRoot     = layout.projectDirectory.dir('.poi-cache')
-def poiConfigsDir    = layout.projectDirectory.dir('poi-configs')
-def poiGeneratedDir  = layout.buildDirectory.dir('generated-resources/poi')
-def poiSkip          = providers.gradleProperty('skipPoiDump').orElse('false').map { it.toBoolean() }
-def poiCacheIdProp   = providers.gradleProperty('poiCacheId').orElse('')
-
-// Separate sourceSet keeps the dumper code (and its net.runelite:cache
-// dependency) out of the runtime plugin jar.
+// Separate sourceSet keeps the dumper (and net.runelite:cache) out of
+// the runtime plugin jar.
 sourceSets {
     dumper {
         java {
@@ -43,196 +28,44 @@ dependencies {
     dumperRuntimeOnly 'org.slf4j:slf4j-simple:1.7.36'
 }
 
-// Resolves the openrs2 cache id to use. Either the explicit -PpoiCacheId
-// value, or the newest oldschool/live cache with a valid disk store and
-// at least one valid xtea key. Cached in build/poi-cache-id.txt so we
-// only hit openrs2 when we actually intend to (re)download.
-tasks.register('resolvePoiCacheId') {
-    group = 'poi'
-    description = 'Resolves which openrs2 cache id to use for the POI dump.'
-
-    inputs.property 'poiCacheIdOverride', poiCacheIdProp
-    inputs.property 'skipPoiDump', poiSkip
-    def outFile = layout.buildDirectory.file('poi-cache-id.txt')
-    outputs.file(outFile)
-
-    doLast {
-        def f = outFile.get().asFile
-        f.parentFile.mkdirs()
-        if (poiSkip.get()) {
-            f.text = 'skipped'
-            logger.lifecycle('POI dump skipped via -PskipPoiDump=true')
-            return
-        }
-        def override = poiCacheIdProp.get()
-        if (override != null && !override.isEmpty()) {
-            f.text = override
-            logger.lifecycle("Using openrs2 cache id ${override} (override)")
-            return
-        }
-        logger.lifecycle('Querying https://archive.openrs2.org/caches.json for latest OSRS cache...')
-        def caches = new JsonSlurper().parse(new URL('https://archive.openrs2.org/caches.json'))
-        def candidates = caches.findAll {
-            it.game == 'oldschool' &&
-            it.environment == 'live' &&
-            it.disk_store_valid &&
-            (it.valid_keys ?: 0) > 0 &&
-            it.timestamp != null
-        }
-        if (candidates.isEmpty()) {
-            throw new GradleException('No suitable oldschool/live cache found on openrs2.')
-        }
-        candidates.sort { a, b -> b.timestamp <=> a.timestamp }
-        def chosen = candidates[0]
-        f.text = String.valueOf(chosen.id)
-        logger.lifecycle("Selected openrs2 cache id ${chosen.id} (timestamp ${chosen.timestamp})")
-    }
-}
-
-// Downloads + extracts the OSRS cache and the XTEA key file into
-// .poi-cache/<id>/. Everything is keyed by cache id so changing the id
-// produces a fresh sibling directory and Gradle correctly invalidates
-// downstream tasks.
-tasks.register('downloadOsrsCache') {
-    group = 'poi'
-    description = 'Downloads the openrs2 OSRS cache + XTEA keys into .poi-cache/.'
-
-    dependsOn 'resolvePoiCacheId'
-    def cacheIdFile = layout.buildDirectory.file('poi-cache-id.txt')
-    inputs.file(cacheIdFile)
-    inputs.property 'skipPoiDump', poiSkip
-
-    // We can't declare a static output dir because the path depends on
-    // the resolved cache id. Use a marker file inside the per-id dir as
-    // the output instead.
-    def markerProvider = cacheIdFile.map { f ->
-        def id = f.asFile.text.trim()
-        poiCacheRoot.file("${id}/.downloaded").asFile
-    }
-    outputs.file(markerProvider)
-
-    doLast {
-        if (poiSkip.get()) {
-            logger.lifecycle('POI dump skipped; not downloading cache.')
-            return
-        }
-        def cacheId = cacheIdFile.get().asFile.text.trim()
-        if (cacheId == 'skipped') {
-            return
-        }
-        def targetDir = poiCacheRoot.dir(cacheId).asFile
-        def marker = new File(targetDir, '.downloaded')
-        def cacheDir = new File(targetDir, 'cache')
-        def keysFile = new File(targetDir, 'keys.json')
-
-        if (marker.exists() && cacheDir.isDirectory() && keysFile.isFile()) {
-            logger.lifecycle("Reusing cached openrs2 cache ${cacheId} at ${targetDir}")
-            return
-        }
-
-        targetDir.mkdirs()
-        cacheDir.mkdirs()
-
-        // 1) Cache disk store
-        def diskZip = new File(targetDir, 'disk.zip')
-        if (!diskZip.exists()) {
-            def url = "https://archive.openrs2.org/caches/runescape/${cacheId}/disk.zip"
-            logger.lifecycle("Downloading ${url} (~170MB)...")
-            url.toURL().withInputStream { input ->
-                diskZip.withOutputStream { output -> output << input }
-            }
-        }
-        logger.lifecycle("Extracting disk store to ${cacheDir}...")
-        ant.unzip(src: diskZip, dest: cacheDir, overwrite: true)
-        // openrs2 zips wrap files in a top-level 'cache/' dir; flatten
-        // so RuneLite's Store can find main_file_cache.* directly.
-        def nested = new File(cacheDir, 'cache')
-        if (nested.isDirectory()) {
-            nested.listFiles().each { f ->
-                java.nio.file.Files.move(f.toPath(),
-                    new File(cacheDir, f.name).toPath(),
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-            }
-            nested.delete()
-        }
-
-        // 2) XTEA keys (openrs2 format uses {mapsquare, key}; runelite's
-        // XteaKeyManager wants {region, keys}).
-        def keysUrl = "https://archive.openrs2.org/caches/runescape/${cacheId}/keys.json"
-        logger.lifecycle("Downloading ${keysUrl}...")
-        def rawKeys = new JsonSlurper().parse(new URL(keysUrl))
-        def transformed = rawKeys.collect { entry ->
-            [region: entry.mapsquare, keys: entry.key]
-        }
-        keysFile.text = groovy.json.JsonOutput.toJson(transformed)
-
-        diskZip.delete()
-        marker.text = "openrs2 cache id: ${cacheId}\n"
-        logger.lifecycle("Cache + keys ready at ${targetDir}")
-    }
-}
-
-// Runs the dumper for every JSON config under poi-configs/.
-tasks.register('dumpPois') {
+tasks.register('dumpPois', JavaExec) {
     group = 'poi'
     description = 'Runs the POI cache dumper for every config in poi-configs/.'
 
-    dependsOn 'downloadOsrsCache'
+    classpath = sourceSets.dumper.runtimeClasspath
+    mainClass = 'com.gpsbookmark.dumper.PoiDumper'
+    jvmArgs '-Xms512m', '-Xmx2g'
 
     inputs.dir(poiConfigsDir).withPropertyName('poiConfigs').withPathSensitivity(PathSensitivity.RELATIVE)
-    inputs.file(layout.buildDirectory.file('poi-cache-id.txt')).withPropertyName('poiCacheId')
-    inputs.property 'skipPoiDump', poiSkip
-    // Treat the dumper classes themselves as an input so a code change
-    // re-runs the dump.
     inputs.files(sourceSets.dumper.output).withPropertyName('dumperClasses')
+    inputs.property 'skipPoiDump', poiSkip
+    inputs.property 'poiCacheId', poiCacheIdProp
     outputs.dir(poiGeneratedDir).withPropertyName('poiGenerated')
 
-    def cp = sourceSets.dumper.runtimeClasspath
-    def cacheIdFile = layout.buildDirectory.file('poi-cache-id.txt')
-
-    doLast {
-        def generatedRoot = poiGeneratedDir.get().asFile
-        // Wipe stale outputs from previous runs (e.g. if a config was
-        // removed/renamed) before regenerating.
-        if (generatedRoot.isDirectory()) {
-            generatedRoot.deleteDir()
+    // Wipe stale outputs (e.g. if a config was removed) before regenerating.
+    doFirst {
+        def out = poiGeneratedDir.get().asFile
+        if (out.isDirectory()) {
+            project.delete(out)
         }
-        generatedRoot.mkdirs()
-
-        if (poiSkip.get()) {
-            logger.lifecycle('POI dump skipped via -PskipPoiDump=true; no resources generated.')
-            return
-        }
-
-        def cacheId = cacheIdFile.get().asFile.text.trim()
-        def cacheDir = poiCacheRoot.dir("${cacheId}/cache").asFile
-        def keysFile = poiCacheRoot.file("${cacheId}/keys.json").asFile
-
-        def configFiles = poiConfigsDir.asFile.listFiles({ File f -> f.name.endsWith('.json') } as FileFilter)
-        if (configFiles == null || configFiles.length == 0) {
-            throw new GradleException("No POI configs found in ${poiConfigsDir.asFile}")
-        }
-        configFiles.sort()
-        configFiles.each { cfg ->
-            def parsed = new JsonSlurper().parse(cfg)
-            def outputResourcePath = parsed.outputResourcePath
-            if (outputResourcePath == null || outputResourcePath.isEmpty()) {
-                throw new GradleException("Config ${cfg.name} is missing 'outputResourcePath'")
-            }
-            def outFile = new File(generatedRoot, outputResourcePath)
-            outFile.parentFile.mkdirs()
-            project.javaexec {
-                classpath = cp
-                mainClass = 'com.gpsbookmark.dumper.PoiDumper'
-                jvmArgs '-Xms512m', '-Xmx2g'
-                args '--config', cfg.absolutePath,
-                     '--cache', cacheDir.absolutePath,
-                     '--xtea', keysFile.absolutePath,
-                     '--output', outFile.absolutePath,
-                     '--cache-revision', cacheId
-            }
-        }
+        out.mkdirs()
     }
+
+    argumentProviders.add({
+        def args = [
+            '--config-dir', poiConfigsDir.asFile.absolutePath,
+            '--cache-root', poiCacheRoot.asFile.absolutePath,
+            '--output-dir', poiGeneratedDir.get().asFile.absolutePath,
+        ]
+        if (poiSkip.get()) {
+            args << '--skip'
+        }
+        def id = poiCacheIdProp.get()
+        if (id != null && !id.isEmpty()) {
+            args.addAll(['--openrs2-cache-id', id])
+        }
+        args
+    } as CommandLineArgumentProvider)
 }
 
 // Embed the generated JSON into the plugin jar.
