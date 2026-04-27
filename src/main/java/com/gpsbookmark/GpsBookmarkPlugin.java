@@ -23,6 +23,7 @@ import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.PluginMessage;
+import net.runelite.client.events.ProfileChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -108,6 +109,21 @@ public class GpsBookmarkPlugin extends Plugin
 	{
 		// Refresh the panel when the player logs in so that "use current location"
 		// in the add dialog will see an up-to-date player position.
+		if (panel != null)
+		{
+			SwingUtilities.invokeLater(panel::refresh);
+		}
+	}
+
+	@Subscribe
+	public void onProfileChanged(ProfileChanged event)
+	{
+		// RuneLite stores config per active profile, but plugins are not
+		// restarted when the user switches profiles.  Reload the bookmarks
+		// from the now-active profile's configuration so the in-memory list
+		// (and any subsequent saves) reflect the chosen profile rather than
+		// the one that was active at startup.
+		loadBookmarks();
 		if (panel != null)
 		{
 			SwingUtilities.invokeLater(panel::refresh);
