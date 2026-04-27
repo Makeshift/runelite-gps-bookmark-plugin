@@ -126,10 +126,11 @@ public class GpsBookmarkPlugin extends Plugin
 	public void onProfileChanged(ProfileChanged event)
 	{
 		// RuneLite stores config per active profile, but plugins are not
-		// restarted when the user switches profiles.  Reload the bookmarks
-		// from the now-active profile's configuration so the in-memory list
-		// (and any subsequent saves) reflect the chosen profile rather than
-		// the one that was active at startup.
+		// restarted when the user switches profiles.  Reload the folders and
+		// bookmarks from the now-active profile's configuration so the
+		// in-memory lists (and any subsequent saves) reflect the chosen
+		// profile rather than the one that was active at startup.
+		loadFolders();
 		loadBookmarks();
 		if (panel != null)
 		{
