@@ -68,6 +68,8 @@ public class GpsBookmarkPlugin extends Plugin
 
 	private final List<GpsBookmark> bookmarks = new ArrayList<>();
 
+	private volatile WorldPoint currentTarget;
+
 	@Provides
 	GpsBookmarkConfig provideConfig(ConfigManager configManager)
 	{
@@ -101,6 +103,7 @@ public class GpsBookmarkPlugin extends Plugin
 		panel = null;
 		navButton = null;
 		bookmarks.clear();
+		currentTarget = null;
 	}
 
 	@Subscribe
@@ -218,8 +221,10 @@ public class GpsBookmarkPlugin extends Plugin
 	 */
 	public void navigateTo(GpsBookmark bookmark)
 	{
+		final WorldPoint target = bookmark.toWorldPoint();
 		final Map<String, Object> data = new HashMap<>();
-		data.put("target", bookmark.toWorldPoint());
+		data.put("target", target);
+		currentTarget = target;
 		clientThread.invokeLater(() ->
 			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_PATH, data)));
 	}
@@ -230,7 +235,21 @@ public class GpsBookmarkPlugin extends Plugin
 	 */
 	public void clearPath()
 	{
+		currentTarget = null;
 		clientThread.invokeLater(() ->
 			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_CLEAR)));
+	}
+
+	/**
+	 * Returns the world point of the most recent Shortest Path target set via
+	 * this plugin, or {@code null} if no target has been set or it has been
+	 * cleared. Note that this only tracks targets that were set through this
+	 * plugin: targets set externally (e.g. via the Shortest Path right-click
+	 * menu) are not visible here, because the Shortest Path plugin does not
+	 * expose its current target through its plugin-message API.
+	 */
+	public WorldPoint getCurrentTarget()
+	{
+		return currentTarget;
 	}
 }

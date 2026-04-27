@@ -18,6 +18,7 @@ import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
+import net.runelite.api.coords.WorldPoint;
 
 /**
  * Modal dialog used both to create a new bookmark and to edit an existing one.
@@ -137,6 +138,19 @@ final class BookmarkDialog extends JDialog
 		useCurrent.addActionListener(e -> fillFromPlayer());
 		buttons.add(useCurrent);
 
+		final JButton useTarget = new JButton("Use current target");
+		if (plugin.getCurrentTarget() == null)
+		{
+			useTarget.setEnabled(false);
+			useTarget.setToolTipText("No active Shortest Path target. Navigate to a bookmark first to set one.");
+		}
+		else
+		{
+			useTarget.setToolTipText("Fill X/Y/Plane with the current Shortest Path target");
+			useTarget.addActionListener(e -> fillFromTarget());
+		}
+		buttons.add(useTarget);
+
 		final JButton ok = new JButton(existing == null ? "Add" : "Save");
 		ok.addActionListener(e -> onOk());
 		buttons.add(ok);
@@ -181,6 +195,18 @@ final class BookmarkDialog extends JDialog
 				planeField.setText(Integer.toString(location.getPlane()));
 			}
 		});
+	}
+
+	private void fillFromTarget()
+	{
+		final WorldPoint target = plugin.getCurrentTarget();
+		if (target == null)
+		{
+			return;
+		}
+		xField.setText(Integer.toString(target.getX()));
+		yField.setText(Integer.toString(target.getY()));
+		planeField.setText(Integer.toString(target.getPlane()));
 	}
 
 	private void onOk()
