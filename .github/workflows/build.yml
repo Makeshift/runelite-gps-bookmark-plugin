@@ -25,12 +25,21 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build shadow jar
-        run: ./gradlew --no-daemon shadowJar
+      - name: Build jars
+        run: ./gradlew --no-daemon jar shadowJar
 
       - name: Upload plugin jar
         uses: actions/upload-artifact@v4
         with:
-          name: gps-bookmark-plugin-jar
+          name: gps-bookmark-plugin
+          path: |
+            build/libs/*.jar
+            !build/libs/*-all.jar
+          if-no-files-found: error
+
+      - name: Upload shadow jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: gps-bookmark-plugin-shadow
           path: build/libs/*-all.jar
           if-no-files-found: error
