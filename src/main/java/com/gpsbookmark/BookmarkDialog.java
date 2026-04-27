@@ -18,7 +18,6 @@ import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
-import net.runelite.api.coords.WorldPoint;
 
 /**
  * Modal dialog used both to create a new bookmark and to edit an existing one.
@@ -162,35 +161,26 @@ final class BookmarkDialog extends JDialog
 		}
 		else
 		{
+			// Pre-fill with 0 immediately so the fields are never blank, then
+			// overwrite asynchronously once the client thread provides the real location.
+			xField.setText("0");
+			yField.setText("0");
+			planeField.setText("0");
 			fillFromPlayer();
 		}
 	}
 
 	private void fillFromPlayer()
 	{
-		final WorldPoint location = plugin.getCurrentPlayerLocation();
-		if (location != null)
+		plugin.getPlayerLocationAsync(location ->
 		{
-			xField.setText(Integer.toString(location.getX()));
-			yField.setText(Integer.toString(location.getY()));
-			planeField.setText(Integer.toString(location.getPlane()));
-		}
-		else
-		{
-			// Fallback so the fields are never empty when adding.
-			if (xField.getText().isEmpty())
+			if (location != null)
 			{
-				xField.setText("0");
+				xField.setText(Integer.toString(location.getX()));
+				yField.setText(Integer.toString(location.getY()));
+				planeField.setText(Integer.toString(location.getPlane()));
 			}
-			if (yField.getText().isEmpty())
-			{
-				yField.setText("0");
-			}
-			if (planeField.getText().isEmpty())
-			{
-				planeField.setText("0");
-			}
-		}
+		});
 	}
 
 	private void onOk()

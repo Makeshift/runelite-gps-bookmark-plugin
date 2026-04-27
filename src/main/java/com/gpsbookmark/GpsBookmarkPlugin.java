@@ -10,6 +10,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
@@ -17,6 +18,7 @@ import net.runelite.api.Client;
 import net.runelite.api.Player;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.GameStateChanged;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
@@ -45,6 +47,9 @@ public class GpsBookmarkPlugin extends Plugin
 
 	@Inject
 	private Client client;
+
+	@Inject
+	private ClientThread clientThread;
 
 	@Inject
 	private ClientToolbar clientToolbar;
@@ -186,12 +191,18 @@ public class GpsBookmarkPlugin extends Plugin
 	// --- Player location --------------------------------------------------
 
 	/**
-	 * @return the player's current world location, or null if unavailable.
+	 * Fetches the player's current world location on the client thread and
+	 * delivers the result (possibly {@code null} when not logged in) to
+	 * {@code callback} on the Swing EDT.  Safe to call from any thread.
 	 */
-	public WorldPoint getCurrentPlayerLocation()
+	public void getPlayerLocationAsync(Consumer<WorldPoint> callback)
 	{
-		final Player player = client.getLocalPlayer();
-		return player == null ? null : player.getWorldLocation();
+		clientThread.invokeLater(() ->
+		{
+			final Player player = client.getLocalPlayer();
+			final WorldPoint location = player == null ? null : player.getWorldLocation();
+			SwingUtilities.invokeLater(() -> callback.accept(location));
+		});
 	}
 
 	// --- Shortest Path integration ----------------------------------------
