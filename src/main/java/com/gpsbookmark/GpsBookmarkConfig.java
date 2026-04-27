@@ -8,35 +8,25 @@ import net.runelite.client.config.ConfigItem;
 public interface GpsBookmarkConfig extends Config
 {
 	String GROUP = "gpsbookmark";
-	String KEY_BOOKMARKS = "bookmarks";
-	String KEY_FOLDERS = "folders";
 
 	/**
-	 * Hidden config item used to persist the serialized list of bookmarks.
-	 * It is not shown in the plugin settings panel because there is no
-	 * {@code @ConfigItem} annotated method exposing it.
+	 * Single config key under which the unified {@link GpsBookmarkData}
+	 * document (folders + bookmarks) is persisted as JSON.
+	 */
+	String KEY_DATA = "data";
+
+	/**
+	 * Hidden config item used to persist the serialized {@link GpsBookmarkData}
+	 * document. It is not shown in the plugin settings panel because no
+	 * {@code @ConfigItem} annotated method exposes it visibly.
 	 */
 	@ConfigItem(
-		keyName = KEY_BOOKMARKS,
+		keyName = KEY_DATA,
 		name = "",
 		description = "",
 		hidden = true
 	)
-	default String bookmarksJson()
-	{
-		return "";
-	}
-
-	/**
-	 * Hidden config item used to persist the serialized list of folders.
-	 */
-	@ConfigItem(
-		keyName = KEY_FOLDERS,
-		name = "",
-		description = "",
-		hidden = true
-	)
-	default String foldersJson()
+	default String dataJson()
 	{
 		return "";
 	}
