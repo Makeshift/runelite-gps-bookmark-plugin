@@ -20,10 +20,20 @@ public class GpsBookmark
 	private int x;
 	private int y;
 	private int plane;
+	/**
+	 * Identifier of the {@link GpsBookmarkFolder} this bookmark belongs to,
+	 * or {@code null} if the bookmark lives at the top level of the sidebar.
+	 */
+	private String folderId;
 
 	public GpsBookmark(String name, String notes, int x, int y, int plane)
 	{
-		this(UUID.randomUUID().toString(), name, notes, x, y, plane);
+		this(UUID.randomUUID().toString(), name, notes, x, y, plane, null);
+	}
+
+	public GpsBookmark(String name, String notes, int x, int y, int plane, String folderId)
+	{
+		this(UUID.randomUUID().toString(), name, notes, x, y, plane, folderId);
 	}
 
 	public WorldPoint toWorldPoint()

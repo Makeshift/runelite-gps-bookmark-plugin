@@ -9,6 +9,7 @@ public interface GpsBookmarkConfig extends Config
 {
 	String GROUP = "gpsbookmark";
 	String KEY_BOOKMARKS = "bookmarks";
+	String KEY_FOLDERS = "folders";
 
 	/**
 	 * Hidden config item used to persist the serialized list of bookmarks.
@@ -22,6 +23,20 @@ public interface GpsBookmarkConfig extends Config
 		hidden = true
 	)
 	default String bookmarksJson()
+	{
+		return "";
+	}
+
+	/**
+	 * Hidden config item used to persist the serialized list of folders.
+	 */
+	@ConfigItem(
+		keyName = KEY_FOLDERS,
+		name = "",
+		description = "",
+		hidden = true
+	)
+	default String foldersJson()
 	{
 		return "";
 	}

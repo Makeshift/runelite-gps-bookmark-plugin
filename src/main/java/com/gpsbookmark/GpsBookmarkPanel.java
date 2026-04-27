@@ -1,21 +1,38 @@
 package com.gpsbookmark;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Cursor;
 import java.awt.Dimension;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
 import java.awt.GridLayout;
+import java.awt.Insets;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.util.ArrayList;
+import java.util.List;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.JScrollPane;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.WindowConstants;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
 
 /**
- * Sidebar panel that lists all GPS bookmarks and exposes an "Add" button.
+ * Sidebar panel that lists all GPS bookmarks (optionally grouped into
+ * collapsible folders) and exposes buttons to add bookmarks/folders and to
+ * clear the current Shortest Path.
  */
 class GpsBookmarkPanel extends PluginPanel
 {
@@ -35,15 +52,19 @@ class GpsBookmarkPanel extends PluginPanel
 		header.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
 		final JLabel title = new JLabel("GPS Bookmarks");
-		title.setForeground(java.awt.Color.WHITE);
+		title.setForeground(Color.WHITE);
 		header.add(title, BorderLayout.WEST);
 
-		final JPanel headerButtons = new JPanel(new GridLayout(1, 2, 4, 0));
+		final JPanel headerButtons = new JPanel(new GridLayout(1, 3, 4, 0));
 		headerButtons.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
 		final JButton addButton = createIconButton("\u002B", "Add a new bookmark for a world location");
 		addButton.addActionListener(e -> openAddDialog());
 		headerButtons.add(addButton);
+
+		final JButton addFolderButton = createIconButton("\uD83D\uDCC1", "Create a new folder");
+		addFolderButton.addActionListener(e -> openAddFolderDialog());
+		headerButtons.add(addFolderButton);
 
 		final JButton clearButton = createIconButton("\u29B8", "Clear the current Shortest Path target");
 		clearButton.addActionListener(e -> plugin.clearPath());
@@ -57,7 +78,7 @@ class GpsBookmarkPanel extends PluginPanel
 		listPanel.setLayout(new BoxLayout(listPanel, BoxLayout.Y_AXIS));
 		listPanel.setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-		emptyLabel.setForeground(java.awt.Color.LIGHT_GRAY);
+		emptyLabel.setForeground(Color.LIGHT_GRAY);
 		emptyLabel.setAlignmentX(CENTER_ALIGNMENT);
 
 		final JPanel wrapper = new JPanel(new BorderLayout());
@@ -76,16 +97,53 @@ class GpsBookmarkPanel extends PluginPanel
 
 		listPanel.removeAll();
 
-		if (plugin.getBookmarks().isEmpty())
+		final List<GpsBookmark> all = plugin.getBookmarks();
+		final List<GpsBookmarkFolder> allFolders = plugin.getFolders();
+
+		if (all.isEmpty() && allFolders.isEmpty())
 		{
 			listPanel.add(emptyLabel);
 		}
 		else
 		{
-			for (GpsBookmark bookmark : plugin.getBookmarks())
+			// Folders (and their contents) come first, then top-level bookmarks.
+			for (GpsBookmarkFolder folder : allFolders)
 			{
-				listPanel.add(createRow(bookmark));
+				listPanel.add(createFolderHeader(folder));
 				listPanel.add(Box.createVerticalStrut(4));
+				if (!folder.isCollapsed())
+				{
+					for (GpsBookmark bookmark : all)
+					{
+						if (folder.getId().equals(bookmark.getFolderId()))
+						{
+							listPanel.add(createIndentedRow(bookmark));
+							listPanel.add(Box.createVerticalStrut(4));
+						}
+					}
+				}
+			}
+
+			boolean hasTopLevel = false;
+			for (GpsBookmark bookmark : all)
+			{
+				if (bookmark.getFolderId() == null || plugin.getFolder(bookmark.getFolderId()) == null)
+				{
+					hasTopLevel = true;
+					break;
+				}
+			}
+			if (hasTopLevel && !allFolders.isEmpty())
+			{
+				listPanel.add(Box.createVerticalStrut(4));
+			}
+			for (GpsBookmark bookmark : all)
+			{
+				if (bookmark.getFolderId() == null || plugin.getFolder(bookmark.getFolderId()) == null)
+				{
+					listPanel.add(createRow(bookmark));
+					listPanel.add(Box.createVerticalStrut(4));
+				}
 			}
 		}
 
@@ -93,19 +151,281 @@ class GpsBookmarkPanel extends PluginPanel
 		listPanel.repaint();
 	}
 
+	private JPanel createFolderHeader(GpsBookmarkFolder folder)
+	{
+		final JPanel header = new JPanel(new BorderLayout(4, 0));
+		header.setBackground(ColorScheme.DARKER_GRAY_HOVER_COLOR);
+		header.setBorder(BorderFactory.createEmptyBorder(4, 6, 4, 6));
+		header.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+		header.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+		final JLabel arrow = new JLabel(folder.isCollapsed() ? "\u25B6" : "\u25BC");
+		arrow.setForeground(Color.WHITE);
+		header.add(arrow, BorderLayout.WEST);
+
+		final JLabel name = new JLabel(folder.getName());
+		name.setForeground(Color.WHITE);
+		name.setToolTipText("Folder: " + folder.getName() + " (right-click for options)");
+		header.add(name, BorderLayout.CENTER);
+
+		header.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				if (SwingUtilities.isLeftMouseButton(e) && e.getClickCount() == 1)
+				{
+					plugin.setFolderCollapsed(folder, !folder.isCollapsed());
+				}
+			}
+
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				maybeShowMenu(e);
+			}
+
+			@Override
+			public void mouseReleased(MouseEvent e)
+			{
+				maybeShowMenu(e);
+			}
+
+			private void maybeShowMenu(MouseEvent e)
+			{
+				if (e.isPopupTrigger())
+				{
+					buildFolderMenu(folder).show(e.getComponent(), e.getX(), e.getY());
+				}
+			}
+		});
+
+		return header;
+	}
+
+	private JPopupMenu buildFolderMenu(GpsBookmarkFolder folder)
+	{
+		final JPopupMenu menu = new JPopupMenu();
+
+		final javax.swing.JMenuItem add = new javax.swing.JMenuItem("Add bookmark in folder...");
+		add.addActionListener(e -> BookmarkDialog.show(this, plugin, null, folder.getId()));
+		menu.add(add);
+
+		final javax.swing.JMenuItem addExisting = new javax.swing.JMenuItem("Add locations...");
+		addExisting.addActionListener(e -> openAddLocationsDialog(folder));
+		menu.add(addExisting);
+
+		menu.addSeparator();
+
+		final javax.swing.JMenuItem rename = new javax.swing.JMenuItem("Rename");
+		rename.addActionListener(e -> openRenameFolderDialog(folder));
+		menu.add(rename);
+
+		final javax.swing.JMenuItem delete = new javax.swing.JMenuItem("Delete");
+		delete.addActionListener(e -> deleteFolderWithPrompt(folder));
+		menu.add(delete);
+
+		return menu;
+	}
+
+	private void deleteFolderWithPrompt(GpsBookmarkFolder folder)
+	{
+		boolean hasChildren = false;
+		for (GpsBookmark b : plugin.getBookmarks())
+		{
+			if (folder.getId().equals(b.getFolderId()))
+			{
+				hasChildren = true;
+				break;
+			}
+		}
+
+		if (!hasChildren)
+		{
+			final int result = JOptionPane.showConfirmDialog(
+				this,
+				"Delete folder '" + folder.getName() + "'?",
+				"Delete folder",
+				JOptionPane.OK_CANCEL_OPTION,
+				JOptionPane.WARNING_MESSAGE);
+			if (result == JOptionPane.OK_OPTION)
+			{
+				plugin.deleteFolder(folder, false);
+			}
+			return;
+		}
+
+		final Object[] options = {"Move bookmarks out", "Delete bookmarks", "Cancel"};
+		final int choice = JOptionPane.showOptionDialog(
+			this,
+			"Folder '" + folder.getName() + "' contains bookmarks.\n"
+				+ "Do you want to move them to the top level or delete them along with the folder?",
+			"Delete folder",
+			JOptionPane.YES_NO_CANCEL_OPTION,
+			JOptionPane.WARNING_MESSAGE,
+			null,
+			options,
+			options[0]);
+		if (choice == 0)
+		{
+			plugin.deleteFolder(folder, false);
+		}
+		else if (choice == 1)
+		{
+			plugin.deleteFolder(folder, true);
+		}
+	}
+
+	private void openRenameFolderDialog(GpsBookmarkFolder folder)
+	{
+		final String input = (String) JOptionPane.showInputDialog(
+			this,
+			"New name:",
+			"Rename folder",
+			JOptionPane.PLAIN_MESSAGE,
+			null,
+			null,
+			folder.getName());
+		if (input == null)
+		{
+			return;
+		}
+		final String trimmed = input.trim();
+		if (trimmed.isEmpty())
+		{
+			JOptionPane.showMessageDialog(this, "Folder name cannot be empty.", "Invalid name", JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+		plugin.renameFolder(folder, trimmed);
+	}
+
+	private void openAddFolderDialog()
+	{
+		final String input = JOptionPane.showInputDialog(
+			this,
+			"Folder name:",
+			"New folder",
+			JOptionPane.PLAIN_MESSAGE);
+		if (input == null)
+		{
+			return;
+		}
+		final String trimmed = input.trim();
+		if (trimmed.isEmpty())
+		{
+			JOptionPane.showMessageDialog(this, "Folder name cannot be empty.", "Invalid name", JOptionPane.ERROR_MESSAGE);
+			return;
+		}
+		plugin.addFolder(trimmed);
+	}
+
+	private void openAddLocationsDialog(GpsBookmarkFolder folder)
+	{
+		final List<GpsBookmark> all = plugin.getBookmarks();
+		if (all.isEmpty())
+		{
+			JOptionPane.showMessageDialog(this, "There are no bookmarks to add.", "Add locations", JOptionPane.INFORMATION_MESSAGE);
+			return;
+		}
+
+		final java.awt.Window owner = SwingUtilities.getWindowAncestor(this);
+		final JDialog dialog = new JDialog(owner, "Add locations to '" + folder.getName() + "'", JDialog.ModalityType.APPLICATION_MODAL);
+		dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+		dialog.setLayout(new BorderLayout(8, 8));
+
+		final JPanel checkboxPanel = new JPanel();
+		checkboxPanel.setLayout(new BoxLayout(checkboxPanel, BoxLayout.Y_AXIS));
+		checkboxPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
+
+		final List<JCheckBox> boxes = new ArrayList<>(all.size());
+		final List<GpsBookmark> bookmarksByIndex = new ArrayList<>(all.size());
+		for (GpsBookmark bookmark : all)
+		{
+			final String suffix;
+			if (folder.getId().equals(bookmark.getFolderId()))
+			{
+				suffix = " (already in this folder)";
+			}
+			else if (bookmark.getFolderId() != null && plugin.getFolder(bookmark.getFolderId()) != null)
+			{
+				suffix = " (in '" + plugin.getFolder(bookmark.getFolderId()).getName() + "')";
+			}
+			else
+			{
+				suffix = "";
+			}
+			final JCheckBox box = new JCheckBox(bookmark.getName() + suffix);
+			box.setSelected(false);
+			box.setEnabled(!folder.getId().equals(bookmark.getFolderId()));
+			boxes.add(box);
+			bookmarksByIndex.add(bookmark);
+			checkboxPanel.add(box);
+		}
+
+		final JScrollPane scroll = new JScrollPane(checkboxPanel);
+		scroll.setPreferredSize(new Dimension(320, Math.min(400, 24 + 28 * Math.min(all.size(), 12))));
+		dialog.add(scroll, BorderLayout.CENTER);
+
+		final JPanel buttons = new JPanel();
+		buttons.setBorder(BorderFactory.createEmptyBorder(0, 8, 8, 8));
+
+		final JButton ok = new JButton("Add to folder");
+		ok.addActionListener(e ->
+		{
+			final List<GpsBookmark> selected = new ArrayList<>();
+			for (int i = 0; i < boxes.size(); i++)
+			{
+				if (boxes.get(i).isSelected())
+				{
+					selected.add(bookmarksByIndex.get(i));
+				}
+			}
+			plugin.moveBookmarksToFolder(selected, folder.getId());
+			dialog.dispose();
+		});
+		buttons.add(ok);
+
+		final JButton cancel = new JButton("Cancel");
+		cancel.addActionListener(e -> dialog.dispose());
+		buttons.add(cancel);
+
+		dialog.add(buttons, BorderLayout.SOUTH);
+		dialog.getRootPane().setDefaultButton(ok);
+		dialog.pack();
+		dialog.setLocationRelativeTo(this);
+		dialog.setVisible(true);
+	}
+
+	private JPanel createIndentedRow(GpsBookmark bookmark)
+	{
+		final JPanel container = new JPanel(new BorderLayout());
+		container.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		container.setBorder(BorderFactory.createEmptyBorder(0, 12, 0, 0));
+		container.setMaximumSize(new Dimension(Integer.MAX_VALUE, 70));
+		container.add(createRow(bookmark), BorderLayout.CENTER);
+		return container;
+	}
+
 	private JPanel createRow(GpsBookmark bookmark)
 	{
-		final JPanel row = new JPanel(new BorderLayout(4, 4));
+		final JPanel row = new JPanel(new GridBagLayout());
 		row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		row.setBorder(BorderFactory.createEmptyBorder(6, 6, 6, 6));
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 70));
 
 		final String tooltipText = buildTooltip(bookmark);
 
+		final GridBagConstraints c = new GridBagConstraints();
+		c.gridx = 0;
+		c.gridy = 0;
+		c.weightx = 1;
+		c.fill = GridBagConstraints.HORIZONTAL;
+		c.insets = new Insets(0, 0, 4, 0);
+
 		final JLabel name = new JLabel(bookmark.getName());
-		name.setForeground(java.awt.Color.WHITE);
+		name.setForeground(Color.WHITE);
 		name.setToolTipText(tooltipText);
-		row.add(name, BorderLayout.NORTH);
+		row.add(name, c);
 		row.setToolTipText(tooltipText);
 
 		final JPanel buttons = new JPanel(new GridLayout(1, 3, 4, 0));
@@ -123,28 +443,88 @@ class GpsBookmarkPanel extends PluginPanel
 		final JButton delete = createIconButton("\u2715", "Delete this bookmark");
 		delete.addActionListener(e ->
 		{
-			final int result = javax.swing.JOptionPane.showConfirmDialog(
+			final int result = JOptionPane.showConfirmDialog(
 				this,
 				"Delete bookmark '" + bookmark.getName() + "'?",
 				"Delete bookmark",
-				javax.swing.JOptionPane.OK_CANCEL_OPTION,
-				javax.swing.JOptionPane.WARNING_MESSAGE);
-			if (result == javax.swing.JOptionPane.OK_OPTION)
+				JOptionPane.OK_CANCEL_OPTION,
+				JOptionPane.WARNING_MESSAGE);
+			if (result == JOptionPane.OK_OPTION)
 			{
 				plugin.deleteBookmark(bookmark);
 			}
 		});
 		buttons.add(delete);
 
-		row.add(buttons, BorderLayout.CENTER);
+		c.gridy = 1;
+		c.insets = new Insets(0, 0, 0, 0);
+		row.add(buttons, c);
+
+		final MouseAdapter popupListener = new MouseAdapter()
+		{
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				maybeShow(e);
+			}
+
+			@Override
+			public void mouseReleased(MouseEvent e)
+			{
+				maybeShow(e);
+			}
+
+			private void maybeShow(MouseEvent e)
+			{
+				if (e.isPopupTrigger())
+				{
+					buildBookmarkMenu(bookmark).show(e.getComponent(), e.getX(), e.getY());
+				}
+			}
+		};
+		row.addMouseListener(popupListener);
+		name.addMouseListener(popupListener);
 		return row;
+	}
+
+	private JPopupMenu buildBookmarkMenu(GpsBookmark bookmark)
+	{
+		final JPopupMenu menu = new JPopupMenu();
+
+		final javax.swing.JMenuItem edit = new javax.swing.JMenuItem("Edit");
+		edit.addActionListener(e -> openEditDialog(bookmark));
+		menu.add(edit);
+
+		final javax.swing.JMenuItem duplicate = new javax.swing.JMenuItem("Duplicate");
+		duplicate.addActionListener(e -> plugin.duplicateBookmark(bookmark));
+		menu.add(duplicate);
+
+		menu.addSeparator();
+
+		final javax.swing.JMenuItem delete = new javax.swing.JMenuItem("Delete");
+		delete.addActionListener(e ->
+		{
+			final int result = JOptionPane.showConfirmDialog(
+				this,
+				"Delete bookmark '" + bookmark.getName() + "'?",
+				"Delete bookmark",
+				JOptionPane.OK_CANCEL_OPTION,
+				JOptionPane.WARNING_MESSAGE);
+			if (result == JOptionPane.OK_OPTION)
+			{
+				plugin.deleteBookmark(bookmark);
+			}
+		});
+		menu.add(delete);
+
+		return menu;
 	}
 
 	private static JButton createIconButton(String glyph, String tooltip)
 	{
 		final JButton button = new JButton(glyph);
 		button.setToolTipText(tooltip);
-		button.setMargin(new java.awt.Insets(2, 4, 2, 4));
+		button.setMargin(new Insets(2, 4, 2, 4));
 		button.setFont(button.getFont().deriveFont(java.awt.Font.PLAIN, 14f));
 		button.setFocusPainted(false);
 		return button;
