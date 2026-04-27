@@ -1,10 +1,9 @@
 package com.gpsbookmark;
 
 import com.google.gson.Gson;
-import com.google.gson.reflect.TypeToken;
+import com.google.gson.JsonSyntaxException;
 import com.google.inject.Provides;
 import java.awt.image.BufferedImage;
-import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -42,14 +41,6 @@ public class GpsBookmarkPlugin extends Plugin
 	private static final String SHORTEST_PATH_PATH = "path";
 	private static final String SHORTEST_PATH_CLEAR = "clear";
 
-	private static final Type BOOKMARK_LIST_TYPE = new TypeToken<List<GpsBookmark>>()
-	{
-	}.getType();
-
-	private static final Type FOLDER_LIST_TYPE = new TypeToken<List<GpsBookmarkFolder>>()
-	{
-	}.getType();
-
 	@Inject
 	private Client client;
 
@@ -83,8 +74,7 @@ public class GpsBookmarkPlugin extends Plugin
 	@Override
 	protected void startUp()
 	{
-		loadFolders();
-		loadBookmarks();
+		loadData();
 
 		panel = new GpsBookmarkPanel(this);
 		panel.refresh();
@@ -126,74 +116,83 @@ public class GpsBookmarkPlugin extends Plugin
 	public void onProfileChanged(ProfileChanged event)
 	{
 		// RuneLite stores config per active profile, but plugins are not
-		// restarted when the user switches profiles.  Reload the folders and
-		// bookmarks from the now-active profile's configuration so the
+		// restarted when the user switches profiles.  Reload the unified
+		// data document from the now-active profile's configuration so the
 		// in-memory lists (and any subsequent saves) reflect the chosen
 		// profile rather than the one that was active at startup.
-		loadFolders();
-		loadBookmarks();
+		loadData();
 		if (panel != null)
 		{
 			SwingUtilities.invokeLater(panel::refresh);
 		}
 	}
 
-	// --- Bookmark persistence ---------------------------------------------
+	// --- Persistence ------------------------------------------------------
 
-	private void loadBookmarks()
-	{
-		bookmarks.clear();
-		final String json = configManager.getConfiguration(GpsBookmarkConfig.GROUP, GpsBookmarkConfig.KEY_BOOKMARKS);
-		if (json == null || json.isEmpty())
-		{
-			return;
-		}
-		try
-		{
-			final List<GpsBookmark> loaded = gson.fromJson(json, BOOKMARK_LIST_TYPE);
-			if (loaded != null)
-			{
-				bookmarks.addAll(loaded);
-			}
-		}
-		catch (Exception e)
-		{
-			log.warn("Failed to load GPS bookmarks", e);
-		}
-	}
-
-	private void saveBookmarks()
-	{
-		final String json = gson.toJson(bookmarks, BOOKMARK_LIST_TYPE);
-		configManager.setConfiguration(GpsBookmarkConfig.GROUP, GpsBookmarkConfig.KEY_BOOKMARKS, json);
-	}
-
-	private void loadFolders()
+	/**
+	 * Replaces the in-memory folder/bookmark lists with the contents of the
+	 * unified {@link GpsBookmarkData} document stored in the active
+	 * profile's configuration. Transparently migrates from the legacy
+	 * two-key layout (separate "bookmarks" and "folders" entries) the first
+	 * time it is encountered.
+	 */
+	private void loadData()
 	{
 		folders.clear();
-		final String json = configManager.getConfiguration(GpsBookmarkConfig.GROUP, GpsBookmarkConfig.KEY_FOLDERS);
-		if (json == null || json.isEmpty())
+		bookmarks.clear();
+
+		final GpsBookmarkData data = readData();
+		if (data.getFolders() != null)
 		{
-			return;
+			folders.addAll(data.getFolders());
 		}
-		try
+		if (data.getBookmarks() != null)
 		{
-			final List<GpsBookmarkFolder> loaded = gson.fromJson(json, FOLDER_LIST_TYPE);
-			if (loaded != null)
-			{
-				folders.addAll(loaded);
-			}
-		}
-		catch (Exception e)
-		{
-			log.warn("Failed to load GPS bookmark folders", e);
+			bookmarks.addAll(data.getBookmarks());
 		}
 	}
 
-	private void saveFolders()
+	private GpsBookmarkData readData()
 	{
-		final String json = gson.toJson(folders, FOLDER_LIST_TYPE);
-		configManager.setConfiguration(GpsBookmarkConfig.GROUP, GpsBookmarkConfig.KEY_FOLDERS, json);
+		final String json = configManager.getConfiguration(GpsBookmarkConfig.GROUP, GpsBookmarkConfig.KEY_DATA);
+		if (json == null || json.isEmpty())
+		{
+			return GpsBookmarkData.empty();
+		}
+		try
+		{
+			final GpsBookmarkData data = gson.fromJson(json, GpsBookmarkData.class);
+			if (data != null)
+			{
+				if (data.getFolders() == null)
+				{
+					data.setFolders(new ArrayList<>());
+				}
+				if (data.getBookmarks() == null)
+				{
+					data.setBookmarks(new ArrayList<>());
+				}
+				return data;
+			}
+		}
+		catch (JsonSyntaxException e)
+		{
+			log.warn("Failed to parse GPS bookmark data; starting empty", e);
+		}
+		return GpsBookmarkData.empty();
+	}
+
+	/**
+	 * Persists the current in-memory folders + bookmarks as a single
+	 * {@link GpsBookmarkData} document. All CRUD operations funnel through
+	 * here so the two lists are always written atomically.
+	 */
+	private void saveData()
+	{
+		final GpsBookmarkData data = new GpsBookmarkData(GpsBookmarkData.CURRENT_VERSION,
+			new ArrayList<>(folders), new ArrayList<>(bookmarks));
+		final String json = gson.toJson(data, GpsBookmarkData.class);
+		configManager.setConfiguration(GpsBookmarkConfig.GROUP, GpsBookmarkConfig.KEY_DATA, json);
 	}
 
 	public List<GpsBookmark> getBookmarks()
@@ -331,7 +330,7 @@ public class GpsBookmarkPlugin extends Plugin
 			bookmark.setFolderId(null);
 		}
 		bookmarks.add(bookmark);
-		saveBookmarks();
+		saveData();
 		refreshPanel();
 	}
 
@@ -347,7 +346,7 @@ public class GpsBookmarkPlugin extends Plugin
 					bookmark.setFolderId(null);
 				}
 				bookmarks.set(i, bookmark);
-				saveBookmarks();
+				saveData();
 				refreshPanel();
 				return;
 			}
@@ -358,7 +357,7 @@ public class GpsBookmarkPlugin extends Plugin
 	{
 		if (bookmarks.removeIf(b -> b.getId().equals(bookmark.getId())))
 		{
-			saveBookmarks();
+			saveData();
 			refreshPanel();
 		}
 	}
@@ -385,7 +384,7 @@ public class GpsBookmarkPlugin extends Plugin
 			source.getFolderId());
 		copy.setName(uniqueBookmarkName(source.getName(), copy.getId()));
 		bookmarks.add(index + 1, copy);
-		saveBookmarks();
+		saveData();
 		refreshPanel();
 	}
 
@@ -411,7 +410,7 @@ public class GpsBookmarkPlugin extends Plugin
 	{
 		final GpsBookmarkFolder folder = new GpsBookmarkFolder(uniqueFolderName(desiredName, null));
 		folders.add(folder);
-		saveFolders();
+		saveData();
 		refreshPanel();
 		return folder;
 	}
@@ -424,7 +423,7 @@ public class GpsBookmarkPlugin extends Plugin
 			return;
 		}
 		existing.setName(uniqueFolderName(newName, existing.getId()));
-		saveFolders();
+		saveData();
 		refreshPanel();
 	}
 
@@ -439,10 +438,9 @@ public class GpsBookmarkPlugin extends Plugin
 		{
 			return;
 		}
-		boolean bookmarksChanged = false;
 		if (deleteContents)
 		{
-			bookmarksChanged = bookmarks.removeIf(b -> folder.getId().equals(b.getFolderId()));
+			bookmarks.removeIf(b -> folder.getId().equals(b.getFolderId()));
 		}
 		else
 		{
@@ -451,16 +449,11 @@ public class GpsBookmarkPlugin extends Plugin
 				if (folder.getId().equals(b.getFolderId()))
 				{
 					b.setFolderId(null);
-					bookmarksChanged = true;
 				}
 			}
 		}
 		folders.removeIf(f -> f.getId().equals(folder.getId()));
-		saveFolders();
-		if (bookmarksChanged)
-		{
-			saveBookmarks();
-		}
+		saveData();
 		refreshPanel();
 	}
 
@@ -472,7 +465,7 @@ public class GpsBookmarkPlugin extends Plugin
 			return;
 		}
 		existing.setCollapsed(collapsed);
-		saveFolders();
+		saveData();
 		refreshPanel();
 	}
 
@@ -503,7 +496,7 @@ public class GpsBookmarkPlugin extends Plugin
 		}
 		if (changed)
 		{
-			saveBookmarks();
+			saveData();
 			refreshPanel();
 		}
 	}
