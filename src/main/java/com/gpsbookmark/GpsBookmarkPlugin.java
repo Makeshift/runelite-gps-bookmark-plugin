@@ -132,9 +132,7 @@ public class GpsBookmarkPlugin extends Plugin
 	/**
 	 * Replaces the in-memory folder/bookmark lists with the contents of the
 	 * unified {@link GpsBookmarkData} document stored in the active
-	 * profile's configuration. Transparently migrates from the legacy
-	 * two-key layout (separate "bookmarks" and "folders" entries) the first
-	 * time it is encountered.
+	 * profile's configuration.
 	 */
 	private void loadData()
 	{
@@ -164,6 +162,10 @@ public class GpsBookmarkPlugin extends Plugin
 			final GpsBookmarkData data = gson.fromJson(json, GpsBookmarkData.class);
 			if (data != null)
 			{
+				if (data.getVersion() <= 0)
+				{
+					data.setVersion(GpsBookmarkData.CURRENT_VERSION);
+				}
 				if (data.getFolders() == null)
 				{
 					data.setFolders(new ArrayList<>());
