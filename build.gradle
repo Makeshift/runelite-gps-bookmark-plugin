@@ -2,6 +2,8 @@ plugins {
 	id 'java'
 }
 
+import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
+
 repositories {
 	mavenLocal()
 	maven {
@@ -40,6 +42,28 @@ tasks.register('run', JavaExec) {
 
 	jvmArgs "-ea"
 	args "--developer-mode", "--debug"
+}
+
+// LWJGL publishes native JARs for every OS/architecture combination.
+// Without platform constraints Gradle tries to resolve all of them, causing
+// "Could not find ... natives-linux-arm64.jar" errors on Windows (or vice versa).
+// Restrict testRuntimeClasspath to only the natives that match the current machine.
+configurations.testRuntimeClasspath {
+	def os = DefaultNativePlatform.currentOperatingSystem
+	def arch = DefaultNativePlatform.currentArchitecture
+	attributes {
+		attribute(
+			OperatingSystemFamily.OPERATING_SYSTEM_ATTRIBUTE,
+			objects.named(OperatingSystemFamily,
+				os.isWindows() ? OperatingSystemFamily.WINDOWS
+				: os.isMacOsX() ? OperatingSystemFamily.MACOS
+				: OperatingSystemFamily.LINUX))
+		attribute(
+			MachineArchitecture.ARCHITECTURE_ATTRIBUTE,
+			objects.named(MachineArchitecture,
+				arch.isAmd64() ? MachineArchitecture.X86_64
+				: MachineArchitecture.ARM64))
+	}
 }
 
 tasks.register('shadowJar', Jar) {
