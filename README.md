@@ -40,3 +40,23 @@ revision changes.
 
 To add a new POI category, drop a new `poi-configs/<name>.json` next to
 `banks.json`; it will be picked up automatically on the next build.
+
+### Cross-checking against shortest-path-tooling
+
+`PoiDumpUpstreamComparisonTest` (opt-in, skipped on every regular
+`./gradlew test`) compares our dump's `objects[]` against the TSV
+produced by upstream
+[shortest-path-tooling](https://github.com/osrs-pathfinding/shortest-path-tooling)'s
+`bankTileDump` task, to catch drift between our filters and theirs.
+
+```bash
+# 1) In a checkout of shortest-path-tooling, against the same cache rev:
+./gradlew bankTileDump -PbankTileCacheDir=$PWD/cache -PbankTileXteaPath=$PWD/keys.json
+
+# 2) Back here:
+./gradlew comparePoiDumpToUpstream \
+    -PupstreamTsv=/abs/path/to/build/bank-tiles/bank_tile_placements.tsv
+```
+
+The task asserts row-set equality across all 12 columns and prints up
+to 25 divergent rows on each side on failure.

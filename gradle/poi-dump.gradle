@@ -71,3 +71,47 @@ tasks.register('dumpPois', JavaExec) {
 // Embed the generated JSON into the plugin jar.
 sourceSets.main.resources.srcDir(poiGeneratedDir)
 processResources.dependsOn 'dumpPois'
+
+// Opt-in: cross-check our JSON dump against the TSV produced by upstream
+// shortest-path-tooling's bankTileDump task. Run their task first to
+// produce bank_tile_placements.tsv against the same cache revision, then:
+//   ./gradlew comparePoiDumpToUpstream -PupstreamTsv=/abs/path/to/bank_tile_placements.tsv
+// Optionally override which JSON to compare via -PourJson=<path>.
+def upstreamTsvProp = providers.gradleProperty('upstreamTsv').orElse('')
+def ourJsonProp     = providers.gradleProperty('ourJson').orElse('')
+
+tasks.register('comparePoiDumpToUpstream', Test) {
+    group = 'verification'
+    description = 'Cross-checks our POI JSON dump against the TSV from ' +
+        'osrs-pathfinding/shortest-path-tooling. Requires -PupstreamTsv=<path>.'
+
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnit()
+    include '**/PoiDumpUpstreamComparisonTest.class'
+
+    // Run on every invocation; the underlying assertions depend on
+    // user-supplied input that Gradle can't fingerprint.
+    outputs.upToDateWhen { false }
+
+    systemProperty 'comparePoiDump', 'true'
+    testLogging {
+        showStandardStreams = true
+        exceptionFormat 'full'
+    }
+
+    doFirst {
+        def tsv = upstreamTsvProp.get()
+        if (tsv.isEmpty()) {
+            throw new GradleException(
+                "comparePoiDumpToUpstream requires -PupstreamTsv=<path-to-upstream-tsv>. " +
+                "Generate it with osrs-pathfinding/shortest-path-tooling's `bankTileDump` task " +
+                "against the same cache revision used by ./gradlew dumpPois.")
+        }
+        systemProperty 'comparePoiDump.upstreamTsv', tsv
+        def ours = ourJsonProp.get()
+        if (!ours.isEmpty()) {
+            systemProperty 'comparePoiDump.ourJson', ours
+        }
+    }
+}
