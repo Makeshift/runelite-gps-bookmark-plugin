@@ -3,7 +3,19 @@ plugins {
 }
 
 repositories {
-	mavenLocal()
+	mavenLocal {
+		// Only serve net.runelite.* artifacts from the local Maven cache.
+		// LWJGL and other third-party deps must come from Maven Central so that
+		// Gradle's variant-aware resolution (backed by Gradle Module Metadata)
+		// selects only the natives that match the current OS/architecture.
+		// Without this restriction, Gradle finds LWJGL POMs in the local cache
+		// (populated when RuneLite was built locally) and tries to resolve every
+		// native variant declared in those POMs - including ones that were never
+		// downloaded on this machine (e.g. linux-arm64 on Windows).
+		content {
+			includeGroupByRegex("net\\.runelite.*")
+		}
+	}
 	maven {
 		url = 'https://repo.runelite.net'
 		content {
@@ -14,7 +26,7 @@ repositories {
 }
 
 def runeLiteVersion = 'latest.release'
-def pluginMainClass = 'com.example.ExamplePluginTest'
+def pluginMainClass = 'com.gpsbookmark.GpsBookmarkPluginTest'
 
 dependencies {
 	compileOnly group: 'net.runelite', name:'client', version: runeLiteVersion
@@ -27,7 +39,7 @@ dependencies {
 	testImplementation group: 'net.runelite', name:'jshell', version: runeLiteVersion
 }
 
-group = 'com.example'
+group = 'com.gpsbookmark'
 
 tasks.withType(JavaCompile).configureEach {
 	options.encoding = 'UTF-8'
