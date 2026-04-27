@@ -1,0 +1,14 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "gradle shadowJar",
+      "type": "shell",
+      "command": "./gradlew --no-daemon shadowJar",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build"
+    }
+  ]
+}

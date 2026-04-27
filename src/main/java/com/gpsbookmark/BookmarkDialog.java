@@ -9,6 +9,7 @@ import java.awt.Insets;
 import java.awt.Window;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -28,16 +29,22 @@ import javax.swing.WindowConstants;
  */
 final class BookmarkDialog extends JDialog
 {
+	private static final String FOLDER_NEW_LABEL = "<New folder...>";
+	private static final String FOLDER_NONE_LABEL = "(None)";
+
 	private final JTextField nameField = new JTextField(16);
 	private final JTextField xField = new JTextField(6);
 	private final JTextField yField = new JTextField(6);
 	private final JTextField planeField = new JTextField(3);
 	private final JTextArea notesField = new JTextArea(4, 16);
+	private final JComboBox<FolderItem> folderCombo = new JComboBox<>();
 
 	private final GpsBookmarkPlugin plugin;
 	private final GpsBookmark existing;
+	/** Last selection, used to restore the previous choice when the user cancels the "New folder" prompt. */
+	private FolderItem previousFolderSelection;
 
-	private BookmarkDialog(Window owner, GpsBookmarkPlugin plugin, GpsBookmark existing)
+	private BookmarkDialog(Window owner, GpsBookmarkPlugin plugin, GpsBookmark existing, String defaultFolderId)
 	{
 		super(owner, existing == null ? "Add bookmark" : "Edit bookmark", ModalityType.APPLICATION_MODAL);
 		this.plugin = plugin;
@@ -49,6 +56,7 @@ final class BookmarkDialog extends JDialog
 		add(buildForm(), BorderLayout.CENTER);
 		add(buildButtons(), BorderLayout.SOUTH);
 
+		populateFolderCombo(existing != null ? existing.getFolderId() : defaultFolderId);
 		populateFields();
 
 		pack();
@@ -58,8 +66,18 @@ final class BookmarkDialog extends JDialog
 
 	static void show(Component parent, GpsBookmarkPlugin plugin, GpsBookmark existing)
 	{
+		show(parent, plugin, existing, null);
+	}
+
+	/**
+	 * Opens the dialog. When creating a new bookmark, {@code defaultFolderId}
+	 * pre-selects a folder in the dropdown (used when adding a bookmark from
+	 * within a folder context).
+	 */
+	static void show(Component parent, GpsBookmarkPlugin plugin, GpsBookmark existing, String defaultFolderId)
+	{
 		final Window owner = parent == null ? null : SwingUtilities.getWindowAncestor(parent);
-		final BookmarkDialog dialog = new BookmarkDialog(owner, plugin, existing);
+		final BookmarkDialog dialog = new BookmarkDialog(owner, plugin, existing, defaultFolderId);
 		dialog.setVisible(true);
 	}
 
@@ -83,6 +101,17 @@ final class BookmarkDialog extends JDialog
 		c.gridwidth = 3;
 		c.weightx = 1;
 		form.add(nameField, c);
+		c.gridwidth = 1;
+		row++;
+
+		c.gridx = 0;
+		c.gridy = row;
+		c.weightx = 0;
+		form.add(new JLabel("Folder:"), c);
+		c.gridx = 1;
+		c.gridwidth = 3;
+		c.weightx = 1;
+		form.add(folderCombo, c);
 		c.gridwidth = 1;
 		row++;
 
@@ -147,6 +176,75 @@ final class BookmarkDialog extends JDialog
 
 		getRootPane().setDefaultButton(ok);
 		return buttons;
+	}
+
+	private void populateFolderCombo(String selectedFolderId)
+	{
+		// Avoid firing the action listener while we rebuild the items.
+		final java.awt.event.ActionListener[] listeners = folderCombo.getActionListeners();
+		for (java.awt.event.ActionListener l : listeners)
+		{
+			folderCombo.removeActionListener(l);
+		}
+
+		folderCombo.removeAllItems();
+		folderCombo.addItem(new FolderItem(null, FOLDER_NONE_LABEL));
+		FolderItem toSelect = null;
+		for (GpsBookmarkFolder folder : plugin.getFolders())
+		{
+			final FolderItem item = new FolderItem(folder.getId(), folder.getName());
+			folderCombo.addItem(item);
+			if (folder.getId().equals(selectedFolderId))
+			{
+				toSelect = item;
+			}
+		}
+		folderCombo.addItem(new FolderItem(null, FOLDER_NEW_LABEL));
+
+		if (toSelect != null)
+		{
+			folderCombo.setSelectedItem(toSelect);
+		}
+		else
+		{
+			folderCombo.setSelectedIndex(0);
+		}
+		previousFolderSelection = (FolderItem) folderCombo.getSelectedItem();
+
+		// Restore (or install on first call) the new-folder-prompt listener.
+		folderCombo.addActionListener(e ->
+		{
+			final FolderItem selected = (FolderItem) folderCombo.getSelectedItem();
+			if (selected == null || selected == previousFolderSelection)
+			{
+				return;
+			}
+			if (FOLDER_NEW_LABEL.equals(selected.label))
+			{
+				promptForNewFolder();
+			}
+			else
+			{
+				previousFolderSelection = selected;
+			}
+		});
+	}
+
+	private void promptForNewFolder()
+	{
+		final String input = JOptionPane.showInputDialog(
+			this,
+			"New folder name:",
+			"New folder",
+			JOptionPane.PLAIN_MESSAGE);
+		if (input == null || input.trim().isEmpty())
+		{
+			folderCombo.setSelectedItem(previousFolderSelection);
+			return;
+		}
+		final GpsBookmarkFolder folder = plugin.addFolder(input.trim());
+		// Rebuild so the new folder appears in the list and can be selected.
+		populateFolderCombo(folder.getId());
 	}
 
 	private void populateFields()
@@ -214,10 +312,12 @@ final class BookmarkDialog extends JDialog
 		}
 
 		final String notes = notesField.getText() == null ? "" : notesField.getText();
+		final FolderItem selectedFolder = (FolderItem) folderCombo.getSelectedItem();
+		final String folderId = selectedFolder == null ? null : selectedFolder.id;
 
 		if (existing == null)
 		{
-			plugin.addBookmark(new GpsBookmark(name, notes, x, y, plane));
+			plugin.addBookmark(new GpsBookmark(name, notes, x, y, plane, folderId));
 		}
 		else
 		{
@@ -226,6 +326,7 @@ final class BookmarkDialog extends JDialog
 			existing.setX(x);
 			existing.setY(y);
 			existing.setPlane(plane);
+			existing.setFolderId(folderId);
 			plugin.updateBookmark(existing);
 		}
 
@@ -242,6 +343,25 @@ final class BookmarkDialog extends JDialog
 		{
 			JOptionPane.showMessageDialog(this, fieldName + " must be a whole number.", "Invalid input", JOptionPane.ERROR_MESSAGE);
 			return null;
+		}
+	}
+
+	/** Combo box item representing either an existing folder, "(None)", or "(New folder...)". */
+	private static final class FolderItem
+	{
+		private final String id;
+		private final String label;
+
+		FolderItem(String id, String label)
+		{
+			this.id = id;
+			this.label = label;
+		}
+
+		@Override
+		public String toString()
+		{
+			return label;
 		}
 	}
 }
