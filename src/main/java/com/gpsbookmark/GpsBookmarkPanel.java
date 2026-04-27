@@ -21,7 +21,7 @@ class GpsBookmarkPanel extends PluginPanel
 {
 	private final GpsBookmarkPlugin plugin;
 	private final JPanel listPanel = new JPanel();
-	private final JLabel emptyLabel = new JLabel("No bookmarks yet. Click 'Add' to create one.", SwingConstants.CENTER);
+	private final JLabel emptyLabel = new JLabel("No bookmarks yet. Click '+' to create one.", SwingConstants.CENTER);
 
 	GpsBookmarkPanel(GpsBookmarkPlugin plugin)
 	{
@@ -38,10 +38,18 @@ class GpsBookmarkPanel extends PluginPanel
 		title.setForeground(java.awt.Color.WHITE);
 		header.add(title, BorderLayout.WEST);
 
-		final JButton addButton = new JButton("Add");
-		addButton.setToolTipText("Add a new bookmark for a world location");
+		final JPanel headerButtons = new JPanel(new GridLayout(1, 2, 4, 0));
+		headerButtons.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
+		final JButton addButton = createIconButton("\u002B", "Add a new bookmark for a world location");
 		addButton.addActionListener(e -> openAddDialog());
-		header.add(addButton, BorderLayout.EAST);
+		headerButtons.add(addButton);
+
+		final JButton clearButton = createIconButton("\u29B8", "Clear the current Shortest Path target");
+		clearButton.addActionListener(e -> plugin.clearPath());
+		headerButtons.add(clearButton);
+
+		header.add(headerButtons, BorderLayout.EAST);
 
 		add(header, BorderLayout.NORTH);
 
