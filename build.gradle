@@ -2,10 +2,20 @@ plugins {
 	id 'java'
 }
 
-import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
-
 repositories {
-	mavenLocal()
+	mavenLocal {
+		// Only serve net.runelite.* artifacts from the local Maven cache.
+		// LWJGL and other third-party deps must come from Maven Central so that
+		// Gradle's variant-aware resolution (backed by Gradle Module Metadata)
+		// selects only the natives that match the current OS/architecture.
+		// Without this restriction, Gradle finds LWJGL POMs in the local cache
+		// (populated when RuneLite was built locally) and tries to resolve every
+		// native variant declared in those POMs - including ones that were never
+		// downloaded on this machine (e.g. linux-arm64 on Windows).
+		content {
+			includeGroupByRegex("net\\.runelite.*")
+		}
+	}
 	maven {
 		url = 'https://repo.runelite.net'
 		content {
@@ -42,28 +52,6 @@ tasks.register('run', JavaExec) {
 
 	jvmArgs "-ea"
 	args "--developer-mode", "--debug"
-}
-
-// LWJGL publishes native JARs for every OS/architecture combination.
-// Without platform constraints Gradle tries to resolve all of them, causing
-// "Could not find ... natives-linux-arm64.jar" errors on Windows (or vice versa).
-// Restrict testRuntimeClasspath to only the natives that match the current machine.
-configurations.testRuntimeClasspath {
-	def os = DefaultNativePlatform.currentOperatingSystem
-	def arch = DefaultNativePlatform.currentArchitecture
-	attributes {
-		attribute(
-			OperatingSystemFamily.OPERATING_SYSTEM_ATTRIBUTE,
-			objects.named(OperatingSystemFamily,
-				os.isWindows() ? OperatingSystemFamily.WINDOWS
-				: os.isMacOsX() ? OperatingSystemFamily.MACOS
-				: OperatingSystemFamily.LINUX))
-		attribute(
-			MachineArchitecture.ARCHITECTURE_ATTRIBUTE,
-			objects.named(MachineArchitecture,
-				arch.isAmd64() ? MachineArchitecture.X86_64
-				: MachineArchitecture.ARM64))
-	}
 }
 
 tasks.register('shadowJar', Jar) {
