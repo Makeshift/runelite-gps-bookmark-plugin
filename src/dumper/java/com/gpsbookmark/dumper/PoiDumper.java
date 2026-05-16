@@ -1,7 +1,5 @@
 package com.gpsbookmark.dumper;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
@@ -21,6 +19,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+
 import net.runelite.cache.EntityOpsDefinition;
 import net.runelite.cache.ObjectManager;
 import net.runelite.cache.definitions.ObjectDefinition;
@@ -36,20 +38,22 @@ import net.runelite.cache.util.XteaKeyManager;
  * {@link PoiDumpConfig}s and writes each result as a JSON file under
  * {@code --output-dir}.
  *
- * <p>Invocation:
+ * <p>
+ * Invocation:
+ * 
  * <pre>
  *   java -cp ... com.gpsbookmark.dumper.PoiDumper \
  *       --config-dir       poi-configs/ \
  *       --cache-root       .poi-cache/ \
  *       --output-dir       build/generated-resources/poi/ \
- *       [--openrs2-cache-id 2499] \
+ *       --cache-id         2499 \
  *       [--skip]
  * </pre>
  *
- * <p>Without {@code --openrs2-cache-id} the newest oldschool/live cache
- * from <a href="https://archive.openrs2.org">archive.openrs2.org</a> is
- * used; the cache is downloaded into {@code <cache-root>/<id>/} on first
- * use and reused thereafter. {@code --skip} writes nothing and exits 0.
+ * <p>
+ * The cache must already exist under {@code <cache-root>/<id>/}, usually
+ * via the {@code downloadPoiCache} Gradle task. {@code --skip} writes
+ * nothing and exits 0.
  */
 public final class PoiDumper
 {
@@ -62,34 +66,25 @@ public final class PoiDumper
 	{
 		Map<String, String> opts = parseArgs(args);
 
-		Path outputDir = Paths.get(required(opts, "--output-dir"));
-		Files.createDirectories(outputDir);
-
 		if (opts.containsKey("--skip"))
 		{
 			System.out.println("POI dump skipped (--skip); no resources generated.");
 			return;
 		}
+		
+		Path outputDir = Paths.get(required(opts, "--output-dir"));
+		Files.createDirectories(outputDir);
 
 		Path configDir = Paths.get(required(opts, "--config-dir"));
 		Path cacheRoot = Paths.get(required(opts, "--cache-root"));
-		String cacheIdOverride = opts.get("--openrs2-cache-id");
-		boolean haveOverride = cacheIdOverride != null && !cacheIdOverride.isEmpty();
+		String cacheId = required(opts, "--cache-id");
 
 		List<Path> configFiles = listConfigs(configDir);
 
-		String cacheId = haveOverride
-			? cacheIdOverride
-			: Openrs2CacheFetcher.resolveLatestCacheId();
-		if (haveOverride)
-		{
-			System.out.println("Using openrs2 cache id " + cacheId + " (override)");
-		}
-
 		Path cacheHome = cacheRoot.resolve(cacheId);
-		Openrs2CacheFetcher.ensureDownloaded(cacheId, cacheHome);
 		File cacheDir = cacheHome.resolve("cache").toFile();
 		File xteaFile = cacheHome.resolve("keys.json").toFile();
+		ensureCachePresent(cacheId, cacheHome, cacheDir, xteaFile);
 
 		XteaKeyManager xteaKeyManager = new XteaKeyManager();
 		try (FileInputStream fin = new FileInputStream(xteaFile))
@@ -112,6 +107,18 @@ public final class PoiDumper
 				dumpOne(cfgPath, objectManager, regionLoader, outputDir, cacheId);
 			}
 		}
+	}
+
+	private static void ensureCachePresent(String cacheId, Path cacheHome, File cacheDir, File xteaFile)
+			throws IOException {
+		if (cacheDir.isDirectory() && xteaFile.isFile()) {
+			return;
+		}
+
+		throw new IOException(
+				"Cache " + cacheId + " is not available at " + cacheHome + ". " +
+						"Run ./gradlew downloadPoiCache -PpoiCacheId=" + cacheId +
+						" first, or choose a downloaded cache id.");
 	}
 
 	private static void dumpOne(Path cfgPath, ObjectManager objectManager,
