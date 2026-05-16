@@ -78,6 +78,14 @@ public class GpsBookmarkPlugin extends Plugin
 	private final List<GpsBookmarkFolder> folders = new ArrayList<>();
 	private PoiCatalog poiCatalog;
 
+	// Counts in-flight "Find closest" pathfinding requests so the panel's
+	// busy state is only cleared by a `transports` PluginMessage that
+	// actually corresponds to one of those requests (and not, say, a path
+	// completion from a regular bookmark Travel click that happened
+	// while the closest BFS was still running).
+	private final java.util.concurrent.atomic.AtomicInteger pendingClosestRequests
+		= new java.util.concurrent.atomic.AtomicInteger(0);
+
 	@Provides
 	GpsBookmarkConfig provideConfig(ConfigManager configManager)
 	{
@@ -153,8 +161,10 @@ public class GpsBookmarkPlugin extends Plugin
 	{
 		if (panel != null
 			&& SHORTEST_PATH_NAMESPACE.equals(event.getNamespace())
-			&& SHORTEST_PATH_TRANSPORTS.equals(event.getName()))
+			&& SHORTEST_PATH_TRANSPORTS.equals(event.getName())
+			&& pendingClosestRequests.get() > 0)
 		{
+			pendingClosestRequests.decrementAndGet();
 			SwingUtilities.invokeLater(panel::onShortestPathPathReady);
 		}
 	}
@@ -638,6 +648,7 @@ public class GpsBookmarkPlugin extends Plugin
 		final Set<WorldPoint> targets = new HashSet<>(points);
 		final Map<String, Object> data = new HashMap<>();
 		data.put("target", targets);
+		pendingClosestRequests.incrementAndGet();
 		clientThread.invokeLater(() ->
 			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_PATH, data)));
 		return true;

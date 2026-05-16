@@ -40,7 +40,7 @@ import net.runelite.cache.util.XteaKeyManager;
  *
  * <p>
  * Invocation:
- * 
+ *
  * <pre>
  *   java -cp ... com.gpsbookmark.dumper.PoiDumper \
  *       --config-dir       poi-configs/ \
@@ -71,7 +71,7 @@ public final class PoiDumper
 			System.out.println("POI dump skipped (--skip); no resources generated.");
 			return;
 		}
-		
+
 		Path outputDir = Paths.get(required(opts, "--output-dir"));
 		Files.createDirectories(outputDir);
 

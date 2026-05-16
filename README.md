@@ -41,7 +41,7 @@ Typical usage:
 * Generate POI JSON from the selected downloaded cache: `./gradlew dumpPois`
 * Skip JSON generation for a build: `./gradlew jar -PskipPoiDump=true`
 
-If no cache has been downloaded yet, `dumpPois`/`jar`/`shadowJar` fail with a message telling you to run `downloadPoiCache` first.
+If no cache has been downloaded yet, `dumpPois` logs a warning and auto-skips JSON generation so `./gradlew test`/`build`/`classes` work out of the box on a fresh checkout (the embedded "Find closest" data will simply be empty until you run `downloadPoiCache`). To explicitly skip for a single build, pass `-PskipPoiDump=true`.
 
 To add a new POI category, drop a new `poi-configs/<name>.json` next to
 `banks.json`; it will be picked up automatically on the next build.

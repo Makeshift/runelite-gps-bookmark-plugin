@@ -25,6 +25,12 @@ def poiGeneratedDir = layout.buildDirectory.dir('generated-resources/poi')
 def poiSelectedCacheIdFile = poiCacheRoot.file('selected-cache-id.txt')
 def poiSkip         = providers.gradleProperty('skipPoiDump').orElse('false').map { it.toBoolean() }
 def poiCacheIdProp  = providers.gradleProperty('poiCacheId').orElse('')
+// Resolves the openrs2 cache id to use for dumpPois. Returns an empty
+// string when no cache has been downloaded and no override was supplied,
+// which causes dumpPois to auto-skip with a warning rather than failing
+// the whole build (so `./gradlew test`/`build`/`classes` work on a fresh
+// checkout without first running `downloadPoiCache` or passing
+// `-PskipPoiDump=true`).
 def poiSelectedCacheId = providers.provider {
     def override = poiCacheIdProp.get()
     if (override != null && !override.isEmpty()) {
@@ -33,17 +39,10 @@ def poiSelectedCacheId = providers.provider {
 
     def selectedFile = poiSelectedCacheIdFile.asFile
     if (!selectedFile.isFile()) {
-        throw new GradleException(
-            "No POI cache has been downloaded yet. Run ./gradlew downloadPoiCache " +
-            "or pass -PpoiCacheId=<id> after downloading that cache.")
+        return ''
     }
 
-    def selectedId = selectedFile.getText('UTF-8').trim()
-    if (selectedId.isEmpty()) {
-        throw new GradleException(
-            "POI cache selection file is empty: ${selectedFile}. Run ./gradlew downloadPoiCache again.")
-    }
-    selectedId
+    selectedFile.getText('UTF-8').trim()
 }
 
 // Separate sourceSet keeps the dumper (and net.runelite:cache) out of
@@ -68,7 +67,7 @@ tasks.register('downloadPoiCache', JavaExec) {
     group = 'poi'
     description = 'Downloads a openrs2 cache snapshot into .poi-cache/ and records its id.'
 
-    classpath = sourceSets.            dumper.runtimeClasspath
+    classpath = sourceSets.dumper.runtimeClasspath
     mainClass = 'com.gpsbookmark.dumper.PoiCacheDownloader'
     jvmArgs '-Xms256m', '-Xmx512m'
 
@@ -78,7 +77,7 @@ tasks.register('downloadPoiCache', JavaExec) {
     argumentProviders.add({
         def args = [
             '--cache-root', poiCacheRoot.asFile.absolutePath,
-	        '--selected-cache-id-file', poiSelectedCacheIdFile.asFile.absolutePath,
+            '--selected-cache-id-file', poiSelectedCacheIdFile.asFile.absolutePath,
         ]
         def id = poiCacheIdProp.get()
         if (id != null && !id.isEmpty()) {
@@ -120,10 +119,21 @@ tasks.register('dumpPois', JavaExec) {
             '--cache-root', poiCacheRoot.asFile.absolutePath,
             '--output-dir', poiGeneratedDir.get().asFile.absolutePath,
         ]
+        def selectedId = poiSelectedCacheId.get()
         if (poiSkip.get()) {
             args << '--skip'
+        } else if (selectedId == null || selectedId.isEmpty()) {
+            // No cache downloaded yet and no override supplied; auto-skip
+            // so `./gradlew test`/`build` work on a fresh checkout. The
+            // plugin's PoiCatalog handles the missing JSON resources by
+            // returning an empty list, so "Find closest" will just be
+            // a no-op until the cache is downloaded.
+            logger.warn(
+                "dumpPois: no POI cache downloaded (and no -PpoiCacheId override); " +
+                "skipping POI generation. Run ./gradlew downloadPoiCache to enable.")
+            args << '--skip'
         } else {
-            args.addAll(['--cache-id', poiSelectedCacheId.get()])
+            args.addAll(['--cache-id', selectedId])
         }
         args
     } as CommandLineArgumentProvider)
