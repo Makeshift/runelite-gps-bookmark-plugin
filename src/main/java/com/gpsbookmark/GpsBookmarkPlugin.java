@@ -15,11 +15,17 @@ import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.Player;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.client.chat.ChatColorType;
+import net.runelite.client.chat.ChatMessageBuilder;
+import net.runelite.client.chat.ChatMessageManager;
+import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
@@ -52,6 +58,9 @@ public class GpsBookmarkPlugin extends Plugin
 
 	@Inject
 	private ClientToolbar clientToolbar;
+
+	@Inject
+	private ChatMessageManager chatMessageManager;
 
 	@Inject
 	private ConfigManager configManager;
@@ -355,6 +364,8 @@ public class GpsBookmarkPlugin extends Plugin
 			bookmark.setFolderId(null);
 		}
 		bookmarks.add(bookmark);
+		log.debug("addBookmark name='{}' folderId={} location={}",
+			bookmark.getName(), bookmark.getFolderId(), bookmark.toWorldPoint());
 		saveData();
 		refreshPanel();
 	}
@@ -371,6 +382,8 @@ public class GpsBookmarkPlugin extends Plugin
 					bookmark.setFolderId(null);
 				}
 				bookmarks.set(i, bookmark);
+				log.debug("updateBookmark id={} name='{}' folderId={}",
+					bookmark.getId(), bookmark.getName(), bookmark.getFolderId());
 				saveData();
 				refreshPanel();
 				return;
@@ -382,6 +395,7 @@ public class GpsBookmarkPlugin extends Plugin
 	{
 		if (bookmarks.removeIf(b -> b.getId().equals(bookmark.getId())))
 		{
+			log.debug("deleteBookmark id={} name='{}'", bookmark.getId(), bookmark.getName());
 			saveData();
 			refreshPanel();
 		}
@@ -435,6 +449,7 @@ public class GpsBookmarkPlugin extends Plugin
 	{
 		final GpsBookmarkFolder folder = new GpsBookmarkFolder(uniqueFolderName(desiredName, null));
 		folders.add(folder);
+		log.debug("addFolder name='{}' id={}", folder.getName(), folder.getId());
 		saveData();
 		refreshPanel();
 		return folder;
@@ -447,7 +462,9 @@ public class GpsBookmarkPlugin extends Plugin
 		{
 			return;
 		}
+		final String oldName = existing.getName();
 		existing.setName(uniqueFolderName(newName, existing.getId()));
+		log.debug("renameFolder id={} '{}' -> '{}'", existing.getId(), oldName, existing.getName());
 		saveData();
 		refreshPanel();
 	}
@@ -478,6 +495,8 @@ public class GpsBookmarkPlugin extends Plugin
 			}
 		}
 		folders.removeIf(f -> f.getId().equals(folder.getId()));
+		log.debug("deleteFolder id={} name='{}' deleteContents={}",
+			folder.getId(), folder.getName(), deleteContents);
 		saveData();
 		refreshPanel();
 	}
@@ -556,8 +575,18 @@ public class GpsBookmarkPlugin extends Plugin
 	 */
 	public void navigateTo(GpsBookmark bookmark)
 	{
+		final WorldPoint target = bookmark.toWorldPoint();
+		log.debug("navigateTo bookmark='{}' target={}", bookmark.getName(), target);
+		sendChatMessage(new ChatMessageBuilder()
+			.append(ChatColorType.NORMAL)
+			.append("Navigating to bookmark ")
+			.append(ChatColorType.HIGHLIGHT)
+			.append(bookmark.getName())
+			.append(ChatColorType.NORMAL)
+			.append(".")
+			.build());
 		final Map<String, Object> data = new HashMap<>();
-		data.put("target", bookmark.toWorldPoint());
+		data.put("target", target);
 		clientThread.invokeLater(() ->
 			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_PATH, data)));
 	}
@@ -576,14 +605,35 @@ public class GpsBookmarkPlugin extends Plugin
 	{
 		if (poiCatalog == null)
 		{
+			log.warn("navigateToClosest('{}') ignored: POI catalog not initialised", poiCategory);
 			return false;
 		}
 		final List<WorldPoint> points = poiCatalog.getPoints(poiCategory);
 		if (points.isEmpty())
 		{
 			log.warn("No POI data available for category '{}'", poiCategory);
+			sendChatMessage(new ChatMessageBuilder()
+				.append(ChatColorType.NORMAL)
+				.append("No data available for category ")
+				.append(ChatColorType.HIGHLIGHT)
+				.append(poiCategory)
+				.append(ChatColorType.NORMAL)
+				.append(".")
+				.build());
 			return false;
 		}
+
+		log.debug("navigateToClosest category='{}' candidateCount={}", poiCategory, points.size());
+		sendChatMessage(new ChatMessageBuilder()
+			.append(ChatColorType.NORMAL)
+			.append("Finding closest ")
+			.append(ChatColorType.HIGHLIGHT)
+			.append(poiCategory)
+			.append(ChatColorType.NORMAL)
+			.append(" (")
+			.append(Integer.toString(points.size()))
+			.append(" candidates)...")
+			.build());
 
 		final Set<WorldPoint> targets = new HashSet<>(points);
 		final Map<String, Object> data = new HashMap<>();
@@ -604,7 +654,31 @@ public class GpsBookmarkPlugin extends Plugin
 	 */
 	public void clearPath()
 	{
+		log.debug("clearPath");
 		clientThread.invokeLater(() ->
 			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_CLEAR)));
+	}
+
+	/**
+	 * Sends a coloured game-message chat line prefixed with the plugin
+	 * name so users can see what the GPS Bookmarks plugin is doing.
+	 * Silently skipped when the player is not logged in (the chat box
+	 * isn't drawn on the login screen).
+	 */
+	private void sendChatMessage(String message)
+	{
+		if (client.getGameState() != GameState.LOGGED_IN)
+		{
+			return;
+		}
+		final String prefixed = new ChatMessageBuilder()
+			.append(ChatColorType.HIGHLIGHT)
+			.append("[GPS] ")
+			.append(message)
+			.build();
+		chatMessageManager.queue(QueuedMessage.builder()
+			.type(ChatMessageType.GAMEMESSAGE)
+			.runeLiteFormattedMessage(prefixed)
+			.build());
 	}
 }
