@@ -7,8 +7,10 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
@@ -64,6 +66,7 @@ public class GpsBookmarkPlugin extends Plugin
 
 	private final List<GpsBookmark> bookmarks = new ArrayList<>();
 	private final List<GpsBookmarkFolder> folders = new ArrayList<>();
+	private PoiCatalog poiCatalog;
 
 	@Provides
 	GpsBookmarkConfig provideConfig(ConfigManager configManager)
@@ -76,6 +79,7 @@ public class GpsBookmarkPlugin extends Plugin
 	{
 		loadData();
 
+		poiCatalog = new PoiCatalog(gson);
 		panel = new GpsBookmarkPanel(this);
 		panel.refresh();
 
@@ -537,6 +541,38 @@ public class GpsBookmarkPlugin extends Plugin
 		data.put("target", bookmark.toWorldPoint());
 		clientThread.invokeLater(() ->
 			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_PATH, data)));
+	}
+
+	/**
+	 * Asks the Shortest Path plugin to navigate to the closest reachable
+	 * point in a built-in POI category (e.g. nearest bank). The path field
+	 * accepts a {@code Set<WorldPoint>} as its target, which triggers a
+	 * multi-target BFS in upstream's {@code Pathfinder} that picks whichever
+	 * destination is reachable in the fewest tiles (transports included).
+	 */
+	public void navigateToClosest(String poiCategory)
+	{
+		if (poiCatalog == null)
+		{
+			return;
+		}
+		final List<WorldPoint> points = poiCatalog.getPoints(poiCategory);
+		if (points.isEmpty())
+		{
+			log.warn("No POI data available for category '{}'", poiCategory);
+			return;
+		}
+
+		final Set<WorldPoint> targets = new HashSet<>(points);
+		final Map<String, Object> data = new HashMap<>();
+		data.put("target", targets);
+		clientThread.invokeLater(() ->
+			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_PATH, data)));
+	}
+
+	public PoiCatalog getPoiCatalog()
+	{
+		return poiCatalog;
 	}
 
 	/**

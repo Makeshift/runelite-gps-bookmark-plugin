@@ -17,12 +17,14 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
@@ -42,6 +44,11 @@ class GpsBookmarkPanel extends PluginPanel
 
 	GpsBookmarkPanel(GpsBookmarkPlugin plugin)
 	{
+		// Opt out of PluginPanel's default behaviour of wrapping the whole
+		// panel in a single scroll pane: we want the bookmark list to scroll
+		// independently while the header and "find closest" footer stay
+		// pinned to the top/bottom of the sidebar.
+		super(false);
 		this.plugin = plugin;
 		setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 		setLayout(new BorderLayout(0, 8));
@@ -84,7 +91,61 @@ class GpsBookmarkPanel extends PluginPanel
 		final JPanel wrapper = new JPanel(new BorderLayout());
 		wrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		wrapper.add(listPanel, BorderLayout.NORTH);
-		add(wrapper, BorderLayout.CENTER);
+
+		final JScrollPane scrollPane = new JScrollPane(wrapper);
+		scrollPane.setBorder(BorderFactory.createEmptyBorder());
+		scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+		scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+		scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+		scrollPane.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		scrollPane.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		add(scrollPane, BorderLayout.CENTER);
+
+		add(createFindClosestPanel(), BorderLayout.SOUTH);
+	}
+
+	/**
+	 * Builds the bottom "Find closest" row: a dropdown of pre-defined POI
+	 * categories (currently just Bank) plus a Go button that hands the
+	 * category's world points to Shortest Path as a multi-target query.
+	 */
+	private JPanel createFindClosestPanel()
+	{
+		final JPanel container = new JPanel(new BorderLayout(0, 4));
+		container.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		container.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(1, 0, 0, 0, ColorScheme.DARKER_GRAY_HOVER_COLOR),
+			BorderFactory.createEmptyBorder(6, 0, 0, 0)));
+
+		final JLabel label = new JLabel("Find closest:");
+		label.setForeground(Color.WHITE);
+		label.setToolTipText("Navigate to the closest reachable point in the selected category via Shortest Path");
+		container.add(label, BorderLayout.NORTH);
+
+		final JPanel row = new JPanel(new BorderLayout(4, 0));
+		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
+		final List<String> categories = plugin.getPoiCatalog() == null
+			? java.util.Collections.singletonList(PoiCatalog.BANKS)
+			: plugin.getPoiCatalog().categories();
+		final JComboBox<String> dropdown = new JComboBox<>(categories.toArray(new String[0]));
+		dropdown.setToolTipText("Pre-defined points of interest to navigate to");
+		row.add(dropdown, BorderLayout.CENTER);
+
+		final JButton go = new JButton("Go");
+		go.setToolTipText("Navigate to the closest reachable item of the selected category");
+		go.addActionListener(e ->
+		{
+			final Object selected = dropdown.getSelectedItem();
+			if (selected != null)
+			{
+				plugin.navigateToClosest(selected.toString());
+			}
+		});
+		row.add(go, BorderLayout.EAST);
+
+		container.add(row, BorderLayout.CENTER);
+		return container;
 	}
 
 	void refresh()
