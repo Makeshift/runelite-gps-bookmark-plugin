@@ -42,6 +42,7 @@ public class GpsBookmarkPlugin extends Plugin
 	private static final String SHORTEST_PATH_NAMESPACE = "shortestpath";
 	private static final String SHORTEST_PATH_PATH = "path";
 	private static final String SHORTEST_PATH_CLEAR = "clear";
+	private static final String SHORTEST_PATH_TRANSPORTS = "transports";
 
 	@Inject
 	private Client client;
@@ -128,6 +129,24 @@ public class GpsBookmarkPlugin extends Plugin
 		if (panel != null)
 		{
 			SwingUtilities.invokeLater(panel::refresh);
+		}
+	}
+
+	/**
+	 * Re-enables the "Find closest" Go button as soon as Shortest Path
+	 * publishes its post-pathfinding {@code transports} message, which is
+	 * the only outgoing PluginMessage upstream emits and fires when
+	 * pathfinding has completed (gated by upstream's {@code postTransports}
+	 * config). Without this hook the panel falls back to a fixed timeout.
+	 */
+	@Subscribe
+	public void onPluginMessage(PluginMessage event)
+	{
+		if (panel != null
+			&& SHORTEST_PATH_NAMESPACE.equals(event.getNamespace())
+			&& SHORTEST_PATH_TRANSPORTS.equals(event.getName()))
+		{
+			SwingUtilities.invokeLater(panel::onShortestPathPathReady);
 		}
 	}
 
@@ -549,18 +568,21 @@ public class GpsBookmarkPlugin extends Plugin
 	 * accepts a {@code Set<WorldPoint>} as its target, which triggers a
 	 * multi-target BFS in upstream's {@code Pathfinder} that picks whichever
 	 * destination is reachable in the fewest tiles (transports included).
+	 *
+	 * @return {@code true} if the request was dispatched, {@code false} if
+	 *         there is no embedded POI data for the requested category.
 	 */
-	public void navigateToClosest(String poiCategory)
+	public boolean navigateToClosest(String poiCategory)
 	{
 		if (poiCatalog == null)
 		{
-			return;
+			return false;
 		}
 		final List<WorldPoint> points = poiCatalog.getPoints(poiCategory);
 		if (points.isEmpty())
 		{
 			log.warn("No POI data available for category '{}'", poiCategory);
-			return;
+			return false;
 		}
 
 		final Set<WorldPoint> targets = new HashSet<>(points);
@@ -568,6 +590,7 @@ public class GpsBookmarkPlugin extends Plugin
 		data.put("target", targets);
 		clientThread.invokeLater(() ->
 			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_PATH, data)));
+		return true;
 	}
 
 	public PoiCatalog getPoiCatalog()

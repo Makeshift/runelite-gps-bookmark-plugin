@@ -27,6 +27,7 @@ import javax.swing.JScrollPane;
 import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.WindowConstants;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
@@ -38,9 +39,23 @@ import net.runelite.client.ui.PluginPanel;
  */
 class GpsBookmarkPanel extends PluginPanel
 {
+	/**
+	 * Hard cap on how long the "Find closest" button stays disabled after a
+	 * Go click, in case Shortest Path never publishes its post-pathfinding
+	 * {@code transports} PluginMessage (it's gated by upstream's
+	 * {@code postTransports} config option, off by default).
+	 */
+	private static final int FIND_CLOSEST_TIMEOUT_MS = 8000;
+
 	private final GpsBookmarkPlugin plugin;
 	private final JPanel listPanel = new JPanel();
 	private final JLabel emptyLabel = new JLabel("No bookmarks yet. Click '+' to create one.", SwingConstants.CENTER);
+
+	// "Find closest" widgets are referenced from setFindClosestBusy(...).
+	private JComboBox<String> findClosestDropdown;
+	private JButton findClosestGo;
+	private String findClosestGoLabel;
+	private Timer findClosestResetTimer;
 
 	GpsBookmarkPanel(GpsBookmarkPlugin plugin)
 	{
@@ -137,15 +152,79 @@ class GpsBookmarkPanel extends PluginPanel
 		go.addActionListener(e ->
 		{
 			final Object selected = dropdown.getSelectedItem();
-			if (selected != null)
+			if (selected == null)
 			{
-				plugin.navigateToClosest(selected.toString());
+				return;
+			}
+			// Disable the controls and surface that pathfinding is in
+			// progress.  Shortest Path runs the BFS on a background
+			// executor, so for large target sets there can be a
+			// noticeable delay before anything visibly happens; the
+			// disabled state both prevents double-submission and tells
+			// the user that something is happening.
+			final boolean dispatched = plugin.navigateToClosest(selected.toString());
+			if (dispatched)
+			{
+				setFindClosestBusy(true);
 			}
 		});
 		row.add(go, BorderLayout.EAST);
 
+		findClosestDropdown = dropdown;
+		findClosestGo = go;
+		findClosestGoLabel = go.getText();
+
 		container.add(row, BorderLayout.CENTER);
 		return container;
+	}
+
+	/**
+	 * Toggles the "Find closest" Go button between idle and "calculating"
+	 * states. When busy, the dropdown and button are disabled and the
+	 * button text becomes "Calculating…"; a {@link Timer} re-enables them
+	 * after {@link #FIND_CLOSEST_TIMEOUT_MS} as a fallback in case
+	 * Shortest Path never publishes its post-pathfinding message.
+	 */
+	private void setFindClosestBusy(boolean busy)
+	{
+		if (findClosestGo == null)
+		{
+			return;
+		}
+		if (findClosestResetTimer != null)
+		{
+			findClosestResetTimer.stop();
+			findClosestResetTimer = null;
+		}
+		if (busy)
+		{
+			findClosestGo.setEnabled(false);
+			findClosestGo.setText("Calculating\u2026");
+			findClosestDropdown.setEnabled(false);
+			findClosestResetTimer = new Timer(FIND_CLOSEST_TIMEOUT_MS, e -> setFindClosestBusy(false));
+			findClosestResetTimer.setRepeats(false);
+			findClosestResetTimer.start();
+		}
+		else
+		{
+			findClosestGo.setEnabled(true);
+			findClosestGo.setText(findClosestGoLabel);
+			findClosestDropdown.setEnabled(true);
+		}
+	}
+
+	/**
+	 * Called by {@link GpsBookmarkPlugin} when Shortest Path publishes its
+	 * post-pathfinding {@code transports} PluginMessage, signalling that
+	 * pathfinding finished and navigation is now visible to the user. Safe
+	 * no-op if the button is not currently in the busy state.
+	 */
+	void onShortestPathPathReady()
+	{
+		if (findClosestGo != null && !findClosestGo.isEnabled())
+		{
+			setFindClosestBusy(false);
+		}
 	}
 
 	void refresh()
