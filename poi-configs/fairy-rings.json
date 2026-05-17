@@ -1,0 +1,12 @@
+{
+  "name": "fairy-rings",
+  "outputResourcePath": "com/gpsbookmark/pois/fairy-rings.json",
+  "comment": "Fairy rings wiki lists object IDs 29495 and 29560 for the transportation network; cache object names/actions are transformed to null, so include by ID.",
+  "namePatterns": [],
+  "requiredActions": [],
+  "forceIncludeIds": [
+    29495,
+    29560
+  ],
+  "excludeIds": []
+}

@@ -1,0 +1,17 @@
+{
+  "name": "gnome-gliders",
+  "outputResourcePath": "com/gpsbookmark/pois/gnome-gliders.json",
+  "comment": "Gnome glider wiki lists standard cache object IDs 187 and 5825; manual points fill wiki-listed destinations represented by pilots/crashed gliders instead of standard static glider objects.",
+  "namePatterns": [],
+  "requiredActions": [],
+  "forceIncludeIds": [
+    187,
+    5825
+  ],
+  "excludeIds": [],
+  "manualPoints": [
+    { "name": "Gnome glider - Ta Quir Priw", "x": 2466, "y": 3496, "plane": 2 },
+    { "name": "Gnome glider - Lemanto Andra", "x": 3325, "y": 3429, "plane": 0 },
+    { "name": "Gnome glider - Ookookolly Undri", "x": 2714, "y": 2803, "plane": 0 }
+  ]
+}

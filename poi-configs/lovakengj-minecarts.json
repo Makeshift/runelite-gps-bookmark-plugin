@@ -1,0 +1,15 @@
+{
+  "name": "lovakengj-minecarts",
+  "outputResourcePath": "com/gpsbookmark/pois/lovakengj-minecarts.json",
+  "comment": "Lovakengj Minecart Network wiki lists object ID 28835, name Minecart, action Travel, across 12 stations.",
+  "namePatterns": [
+    "(?i)^minecart$"
+  ],
+  "requiredActions": [
+    "Travel"
+  ],
+  "forceIncludeIds": [
+    28835
+  ],
+  "excludeIds": []
+}
