@@ -1,0 +1,26 @@
+{
+  "name": "banks",
+  "outputResourcePath": "com/gpsbookmark/pois/banks.json",
+  "comment": "Bank booth / chest / GE booth / deposit box / Varlamore bank table placements. Mirrors DEFAULT_NAME_PATTERNS + hasBankAction + FORCE_INCLUDE_IDS in the upstream BankTileDumperTest.",
+  "namePatterns": [
+    "(?i)^bank booth$",
+    "(?i)^bank chest$",
+    "(?i)^bank chest-wreck$",
+    "(?i)^bank deposit box$",
+    "(?i)^deposit box$",
+    "(?i)^grand exchange booth$",
+    "(?i)^clan hall bank chest$",
+    "(?i)^bank table$"
+  ],
+  "requiredActions": [
+    "Bank",
+    "Use-quickly",
+    "Collect",
+    "Deposit"
+  ],
+  "forceIncludeIds": [
+    12309,
+    58094
+  ],
+  "excludeIds": []
+}

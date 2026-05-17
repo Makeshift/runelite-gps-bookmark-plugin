@@ -7,17 +7,25 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import lombok.extern.slf4j.Slf4j;
+import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.Player;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.client.chat.ChatColorType;
+import net.runelite.client.chat.ChatMessageBuilder;
+import net.runelite.client.chat.ChatMessageManager;
+import net.runelite.client.chat.QueuedMessage;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.EventBus;
 import net.runelite.client.eventbus.Subscribe;
@@ -40,6 +48,7 @@ public class GpsBookmarkPlugin extends Plugin
 	private static final String SHORTEST_PATH_NAMESPACE = "shortestpath";
 	private static final String SHORTEST_PATH_PATH = "path";
 	private static final String SHORTEST_PATH_CLEAR = "clear";
+	private static final String SHORTEST_PATH_TRANSPORTS = "transports";
 
 	@Inject
 	private Client client;
@@ -49,6 +58,9 @@ public class GpsBookmarkPlugin extends Plugin
 
 	@Inject
 	private ClientToolbar clientToolbar;
+
+	@Inject
+	private ChatMessageManager chatMessageManager;
 
 	@Inject
 	private ConfigManager configManager;
@@ -64,6 +76,15 @@ public class GpsBookmarkPlugin extends Plugin
 
 	private final List<GpsBookmark> bookmarks = new ArrayList<>();
 	private final List<GpsBookmarkFolder> folders = new ArrayList<>();
+	private PoiCatalog poiCatalog;
+
+	// Counts in-flight "Find closest" pathfinding requests so the panel's
+	// busy state is only cleared by a `transports` PluginMessage that
+	// actually corresponds to one of those requests (and not, say, a path
+	// completion from a regular bookmark Travel click that happened
+	// while the closest BFS was still running).
+	private final java.util.concurrent.atomic.AtomicInteger pendingClosestRequests
+		= new java.util.concurrent.atomic.AtomicInteger(0);
 
 	@Provides
 	GpsBookmarkConfig provideConfig(ConfigManager configManager)
@@ -76,6 +97,7 @@ public class GpsBookmarkPlugin extends Plugin
 	{
 		loadData();
 
+		poiCatalog = new PoiCatalog(gson);
 		panel = new GpsBookmarkPanel(this);
 		panel.refresh();
 
@@ -124,6 +146,26 @@ public class GpsBookmarkPlugin extends Plugin
 		if (panel != null)
 		{
 			SwingUtilities.invokeLater(panel::refresh);
+		}
+	}
+
+	/**
+	 * Re-enables the "Find closest" Go button as soon as Shortest Path
+	 * publishes its post-pathfinding {@code transports} message, which is
+	 * the only outgoing PluginMessage upstream emits and fires when
+	 * pathfinding has completed (gated by upstream's {@code postTransports}
+	 * config). Without this hook the panel falls back to a fixed timeout.
+	 */
+	@Subscribe
+	public void onPluginMessage(PluginMessage event)
+	{
+		if (panel != null
+			&& SHORTEST_PATH_NAMESPACE.equals(event.getNamespace())
+			&& SHORTEST_PATH_TRANSPORTS.equals(event.getName())
+			&& pendingClosestRequests.get() > 0)
+		{
+			pendingClosestRequests.decrementAndGet();
+			SwingUtilities.invokeLater(panel::onShortestPathPathReady);
 		}
 	}
 
@@ -332,6 +374,8 @@ public class GpsBookmarkPlugin extends Plugin
 			bookmark.setFolderId(null);
 		}
 		bookmarks.add(bookmark);
+		log.debug("addBookmark name='{}' folderId={} location={}",
+			bookmark.getName(), bookmark.getFolderId(), bookmark.toWorldPoint());
 		saveData();
 		refreshPanel();
 	}
@@ -348,6 +392,8 @@ public class GpsBookmarkPlugin extends Plugin
 					bookmark.setFolderId(null);
 				}
 				bookmarks.set(i, bookmark);
+				log.debug("updateBookmark id={} name='{}' folderId={}",
+					bookmark.getId(), bookmark.getName(), bookmark.getFolderId());
 				saveData();
 				refreshPanel();
 				return;
@@ -359,6 +405,7 @@ public class GpsBookmarkPlugin extends Plugin
 	{
 		if (bookmarks.removeIf(b -> b.getId().equals(bookmark.getId())))
 		{
+			log.debug("deleteBookmark id={} name='{}'", bookmark.getId(), bookmark.getName());
 			saveData();
 			refreshPanel();
 		}
@@ -412,6 +459,7 @@ public class GpsBookmarkPlugin extends Plugin
 	{
 		final GpsBookmarkFolder folder = new GpsBookmarkFolder(uniqueFolderName(desiredName, null));
 		folders.add(folder);
+		log.debug("addFolder name='{}' id={}", folder.getName(), folder.getId());
 		saveData();
 		refreshPanel();
 		return folder;
@@ -424,7 +472,9 @@ public class GpsBookmarkPlugin extends Plugin
 		{
 			return;
 		}
+		final String oldName = existing.getName();
 		existing.setName(uniqueFolderName(newName, existing.getId()));
+		log.debug("renameFolder id={} '{}' -> '{}'", existing.getId(), oldName, existing.getName());
 		saveData();
 		refreshPanel();
 	}
@@ -455,6 +505,8 @@ public class GpsBookmarkPlugin extends Plugin
 			}
 		}
 		folders.removeIf(f -> f.getId().equals(folder.getId()));
+		log.debug("deleteFolder id={} name='{}' deleteContents={}",
+			folder.getId(), folder.getName(), deleteContents);
 		saveData();
 		refreshPanel();
 	}
@@ -533,10 +585,78 @@ public class GpsBookmarkPlugin extends Plugin
 	 */
 	public void navigateTo(GpsBookmark bookmark)
 	{
+		final WorldPoint target = bookmark.toWorldPoint();
+		log.debug("navigateTo bookmark='{}' target={}", bookmark.getName(), target);
+		sendChatMessage(new ChatMessageBuilder()
+			.append(ChatColorType.NORMAL)
+			.append("Navigating to bookmark ")
+			.append(ChatColorType.HIGHLIGHT)
+			.append(bookmark.getName())
+			.append(ChatColorType.NORMAL)
+			.append(".")
+			.build());
 		final Map<String, Object> data = new HashMap<>();
-		data.put("target", bookmark.toWorldPoint());
+		data.put("target", target);
 		clientThread.invokeLater(() ->
 			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_PATH, data)));
+	}
+
+	/**
+	 * Asks the Shortest Path plugin to navigate to the closest reachable
+	 * point in a built-in POI category (e.g. nearest bank). The path field
+	 * accepts a {@code Set<WorldPoint>} as its target, which triggers a
+	 * multi-target BFS in upstream's {@code Pathfinder} that picks whichever
+	 * destination is reachable in the fewest tiles (transports included).
+	 *
+	 * @return {@code true} if the request was dispatched, {@code false} if
+	 *         there is no embedded POI data for the requested category.
+	 */
+	public boolean navigateToClosest(String poiCategory)
+	{
+		if (poiCatalog == null)
+		{
+			log.warn("navigateToClosest('{}') ignored: POI catalog not initialised", poiCategory);
+			return false;
+		}
+		final List<WorldPoint> points = poiCatalog.getPoints(poiCategory);
+		if (points.isEmpty())
+		{
+			log.warn("No POI data available for category '{}'", poiCategory);
+			sendChatMessage(new ChatMessageBuilder()
+				.append(ChatColorType.NORMAL)
+				.append("No data available for category ")
+				.append(ChatColorType.HIGHLIGHT)
+				.append(poiCategory)
+				.append(ChatColorType.NORMAL)
+				.append(".")
+				.build());
+			return false;
+		}
+
+		log.debug("navigateToClosest category='{}' candidateCount={}", poiCategory, points.size());
+		sendChatMessage(new ChatMessageBuilder()
+			.append(ChatColorType.NORMAL)
+			.append("Finding closest ")
+			.append(ChatColorType.HIGHLIGHT)
+			.append(poiCategory)
+			.append(ChatColorType.NORMAL)
+			.append(" (")
+			.append(Integer.toString(points.size()))
+			.append(" candidates)...")
+			.build());
+
+		final Set<WorldPoint> targets = new HashSet<>(points);
+		final Map<String, Object> data = new HashMap<>();
+		data.put("target", targets);
+		pendingClosestRequests.incrementAndGet();
+		clientThread.invokeLater(() ->
+			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_PATH, data)));
+		return true;
+	}
+
+	public PoiCatalog getPoiCatalog()
+	{
+		return poiCatalog;
 	}
 
 	/**
@@ -545,7 +665,31 @@ public class GpsBookmarkPlugin extends Plugin
 	 */
 	public void clearPath()
 	{
+		log.debug("clearPath");
 		clientThread.invokeLater(() ->
 			eventBus.post(new PluginMessage(SHORTEST_PATH_NAMESPACE, SHORTEST_PATH_CLEAR)));
+	}
+
+	/**
+	 * Sends a coloured game-message chat line prefixed with the plugin
+	 * name so users can see what the GPS Bookmarks plugin is doing.
+	 * Silently skipped when the player is not logged in (the chat box
+	 * isn't drawn on the login screen).
+	 */
+	private void sendChatMessage(String message)
+	{
+		if (client.getGameState() != GameState.LOGGED_IN)
+		{
+			return;
+		}
+		final String prefixed = new ChatMessageBuilder()
+			.append(ChatColorType.HIGHLIGHT)
+			.append("[GPS] ")
+			.append(message)
+			.build();
+		chatMessageManager.queue(QueuedMessage.builder()
+			.type(ChatMessageType.GAMEMESSAGE)
+			.runeLiteFormattedMessage(prefixed)
+			.build());
 	}
 }

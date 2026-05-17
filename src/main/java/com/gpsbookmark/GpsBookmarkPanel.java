@@ -17,14 +17,17 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
+import javax.swing.ScrollPaneConstants;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 import javax.swing.WindowConstants;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
@@ -36,12 +39,31 @@ import net.runelite.client.ui.PluginPanel;
  */
 class GpsBookmarkPanel extends PluginPanel
 {
+	/**
+	 * Hard cap on how long the "Find closest" button stays disabled after a
+	 * Go click, in case Shortest Path never publishes its post-pathfinding
+	 * {@code transports} PluginMessage (it's gated by upstream's
+	 * {@code postTransports} config option, off by default).
+	 */
+	private static final int FIND_CLOSEST_TIMEOUT_MS = 8000;
+
 	private final GpsBookmarkPlugin plugin;
 	private final JPanel listPanel = new JPanel();
 	private final JLabel emptyLabel = new JLabel("No bookmarks yet. Click '+' to create one.", SwingConstants.CENTER);
 
+	// "Find closest" widgets are referenced from setFindClosestBusy(...).
+	private JComboBox<String> findClosestDropdown;
+	private JButton findClosestGo;
+	private String findClosestGoLabel;
+	private Timer findClosestResetTimer;
+
 	GpsBookmarkPanel(GpsBookmarkPlugin plugin)
 	{
+		// Opt out of PluginPanel's default behaviour of wrapping the whole
+		// panel in a single scroll pane: we want the bookmark list to scroll
+		// independently while the header and "find closest" footer stay
+		// pinned to the top/bottom of the sidebar.
+		super(false);
 		this.plugin = plugin;
 		setBorder(BorderFactory.createEmptyBorder(8, 8, 8, 8));
 		setLayout(new BorderLayout(0, 8));
@@ -84,7 +106,125 @@ class GpsBookmarkPanel extends PluginPanel
 		final JPanel wrapper = new JPanel(new BorderLayout());
 		wrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		wrapper.add(listPanel, BorderLayout.NORTH);
-		add(wrapper, BorderLayout.CENTER);
+
+		final JScrollPane scrollPane = new JScrollPane(wrapper);
+		scrollPane.setBorder(BorderFactory.createEmptyBorder());
+		scrollPane.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+		scrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED);
+		scrollPane.getVerticalScrollBar().setUnitIncrement(16);
+		scrollPane.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		scrollPane.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		add(scrollPane, BorderLayout.CENTER);
+
+		add(createFindClosestPanel(), BorderLayout.SOUTH);
+	}
+
+	/**
+	 * Builds the bottom "Find closest" row: a dropdown of pre-defined POI
+	 * categories (currently just Bank) plus a Go button that hands the
+	 * category's world points to Shortest Path as a multi-target query.
+	 */
+	private JPanel createFindClosestPanel()
+	{
+		final JPanel container = new JPanel(new BorderLayout(0, 4));
+		container.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		container.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createMatteBorder(1, 0, 0, 0, ColorScheme.DARKER_GRAY_HOVER_COLOR),
+			BorderFactory.createEmptyBorder(6, 0, 0, 0)));
+
+		final JLabel label = new JLabel("Find closest:");
+		label.setForeground(Color.WHITE);
+		label.setToolTipText("Navigate to the closest reachable point in the selected category via Shortest Path");
+		container.add(label, BorderLayout.NORTH);
+
+		final JPanel row = new JPanel(new BorderLayout(4, 0));
+		row.setBackground(ColorScheme.DARK_GRAY_COLOR);
+
+		final List<String> categories = plugin.getPoiCatalog() == null
+			? java.util.Collections.singletonList(PoiCatalog.BANKS)
+			: plugin.getPoiCatalog().categories();
+		final JComboBox<String> dropdown = new JComboBox<>(categories.toArray(new String[0]));
+		dropdown.setToolTipText("Pre-defined points of interest to navigate to");
+		row.add(dropdown, BorderLayout.CENTER);
+
+		final JButton go = new JButton("Go");
+		go.setToolTipText("Navigate to the closest reachable item of the selected category");
+		go.addActionListener(e ->
+		{
+			final Object selected = dropdown.getSelectedItem();
+			if (selected == null)
+			{
+				return;
+			}
+			// Disable the controls and surface that pathfinding is in
+			// progress.  Shortest Path runs the BFS on a background
+			// executor, so for large target sets there can be a
+			// noticeable delay before anything visibly happens; the
+			// disabled state both prevents double-submission and tells
+			// the user that something is happening.
+			final boolean dispatched = plugin.navigateToClosest(selected.toString());
+			if (dispatched)
+			{
+				setFindClosestBusy(true);
+			}
+		});
+		row.add(go, BorderLayout.EAST);
+
+		findClosestDropdown = dropdown;
+		findClosestGo = go;
+		findClosestGoLabel = go.getText();
+
+		container.add(row, BorderLayout.CENTER);
+		return container;
+	}
+
+	/**
+	 * Toggles the "Find closest" Go button between idle and "calculating"
+	 * states. When busy, the dropdown and button are disabled and the
+	 * button text becomes "Calculating…"; a {@link Timer} re-enables them
+	 * after {@link #FIND_CLOSEST_TIMEOUT_MS} as a fallback in case
+	 * Shortest Path never publishes its post-pathfinding message.
+	 */
+	private void setFindClosestBusy(boolean busy)
+	{
+		if (findClosestGo == null)
+		{
+			return;
+		}
+		if (findClosestResetTimer != null)
+		{
+			findClosestResetTimer.stop();
+			findClosestResetTimer = null;
+		}
+		if (busy)
+		{
+			findClosestGo.setEnabled(false);
+			findClosestGo.setText("Calculating\u2026");
+			findClosestDropdown.setEnabled(false);
+			findClosestResetTimer = new Timer(FIND_CLOSEST_TIMEOUT_MS, e -> setFindClosestBusy(false));
+			findClosestResetTimer.setRepeats(false);
+			findClosestResetTimer.start();
+		}
+		else
+		{
+			findClosestGo.setEnabled(true);
+			findClosestGo.setText(findClosestGoLabel);
+			findClosestDropdown.setEnabled(true);
+		}
+	}
+
+	/**
+	 * Called by {@link GpsBookmarkPlugin} when Shortest Path publishes its
+	 * post-pathfinding {@code transports} PluginMessage, signalling that
+	 * pathfinding finished and navigation is now visible to the user. Safe
+	 * no-op if the button is not currently in the busy state.
+	 */
+	void onShortestPathPathReady()
+	{
+		if (findClosestGo != null && !findClosestGo.isEnabled())
+		{
+			setFindClosestBusy(false);
+		}
 	}
 
 	void refresh()

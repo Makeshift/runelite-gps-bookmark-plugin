@@ -8,3 +8,6 @@ nbactions.xml
 nb-configuration.xml
 nbproject/
 bin/
+# Downloaded OSRS cache + XTEA keys for the POI dumper. Populated by
+# the `dumpPois` Gradle task from archive.openrs2.org.
+.poi-cache/
