@@ -130,6 +130,7 @@ public final class PoiDumper
 		Pattern[] namePatterns = compilePatterns(config.namePatterns);
 		Set<Integer> forceIncludeIds = new HashSet<>(config.forceIncludeIds);
 		Set<Integer> excludeIds = new HashSet<>(config.excludeIds);
+		Set<Integer> excludeRegions = new HashSet<>(config.excludeRegions);
 		Set<String> requiredActions = lowerCase(config.requiredActions);
 
 		Set<Integer> matchingIds = collectMatchingIds(objectManager, namePatterns, requiredActions,
@@ -137,7 +138,9 @@ public final class PoiDumper
 		System.out.println("[" + config.name + "] matched " + matchingIds.size()
 			+ " object definition(s)");
 
-		List<PoiObject> rows = collectPlacements(regionLoader, objectManager, matchingIds);
+		List<PoiObject> rows = collectPlacements(regionLoader, objectManager, matchingIds, excludeRegions);
+		addManualPoints(rows, config.manualPoints);
+		sortRows(rows);
 
 		Path output = outputDir.resolve(config.outputResourcePath);
 		if (output.getParent() != null)
@@ -186,6 +189,8 @@ public final class PoiDumper
 			if (config.requiredActions == null) config.requiredActions = new ArrayList<>();
 			if (config.forceIncludeIds == null) config.forceIncludeIds = new ArrayList<>();
 			if (config.excludeIds == null) config.excludeIds = new ArrayList<>();
+			if (config.excludeRegions == null) config.excludeRegions = new ArrayList<>();
+			if (config.manualPoints == null) config.manualPoints = new ArrayList<>();
 			return config;
 		}
 	}
@@ -329,12 +334,16 @@ public final class PoiDumper
 	}
 
 	private static List<PoiObject> collectPlacements(RegionLoader regionLoader,
-		ObjectManager objectManager, Set<Integer> matchingIds)
+		ObjectManager objectManager, Set<Integer> matchingIds, Set<Integer> excludeRegions)
 	{
 		List<PoiObject> rows = new ArrayList<>();
 		Collection<Region> regions = regionLoader.getRegions();
 		for (Region region : regions)
 		{
+			if (excludeRegions.contains(region.getRegionID()))
+			{
+				continue;
+			}
 			for (Location loc : region.getLocations())
 			{
 				int id = loc.getId();
@@ -360,6 +369,32 @@ public final class PoiDumper
 				rows.add(row);
 			}
 		}
+		return rows;
+	}
+
+	private static void addManualPoints(List<PoiObject> rows, List<PoiDumpConfig.ManualPoint> manualPoints)
+	{
+		for (PoiDumpConfig.ManualPoint point : manualPoints)
+		{
+			PoiObject row = new PoiObject();
+			row.id = point.id;
+			row.name = point.name;
+			row.x = point.x;
+			row.y = point.y;
+			row.plane = point.plane;
+			row.regionId = (point.x >> 6 << 8) | (point.y >> 6);
+			row.localX = point.x & 63;
+			row.localY = point.y & 63;
+			row.type = -1;
+			row.orientation = -1;
+			row.sizeX = 1;
+			row.sizeY = 1;
+			rows.add(row);
+		}
+	}
+
+	private static void sortRows(List<PoiObject> rows)
+	{
 		Collections.sort(rows, (a, b) ->
 		{
 			int c = Integer.compare(a.regionId, b.regionId);
@@ -368,9 +403,10 @@ public final class PoiDumper
 			if (c != 0) return c;
 			c = Integer.compare(a.x, b.x);
 			if (c != 0) return c;
-			return Integer.compare(a.y, b.y);
+			c = Integer.compare(a.y, b.y);
+			if (c != 0) return c;
+			return Integer.compare(a.id, b.id);
 		});
-		return rows;
 	}
 
 	// --- Output ---------------------------------------------------------
@@ -388,6 +424,8 @@ public final class PoiDumper
 		result.requiredActions = new ArrayList<>(config.requiredActions);
 		result.forceIncludeIds = new ArrayList<>(config.forceIncludeIds);
 		result.excludeIds = new ArrayList<>(config.excludeIds);
+		result.excludeRegions = new ArrayList<>(config.excludeRegions);
+		result.manualPoints = new ArrayList<>(config.manualPoints);
 		result.objects = rows;
 
 		try (BufferedWriter w = Files.newBufferedWriter(output, StandardCharsets.UTF_8))
@@ -409,6 +447,8 @@ public final class PoiDumper
 		List<String> requiredActions;
 		List<Integer> forceIncludeIds;
 		List<Integer> excludeIds;
+		List<Integer> excludeRegions;
+		List<PoiDumpConfig.ManualPoint> manualPoints;
 		List<PoiObject> objects;
 	}
 

@@ -1,0 +1,25 @@
+{
+  "name": "obelisks",
+  "outputResourcePath": "com/gpsbookmark/pois/obelisks.json",
+  "comment": "Wilderness obelisk wiki lists object IDs 14826-14831. Region 16195 is the POH construction copy and is excluded from overworld navigation.",
+  "namePatterns": [
+    "(?i)^obelisk$"
+  ],
+  "requiredActions": [
+    "Activate",
+    "Teleport to Destination",
+    "Set Destination"
+  ],
+  "forceIncludeIds": [
+    14826,
+    14827,
+    14828,
+    14829,
+    14830,
+    14831
+  ],
+  "excludeIds": [],
+  "excludeRegions": [
+    16195
+  ]
+}

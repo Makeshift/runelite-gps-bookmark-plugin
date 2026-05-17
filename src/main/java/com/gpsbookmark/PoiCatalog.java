@@ -25,12 +25,24 @@ final class PoiCatalog
 {
 	/** Key used by the sidebar's "find closest" dropdown. */
 	static final String BANKS = "Bank";
+	static final String FAIRY_RINGS = "Fairy Ring";
+	static final String SPIRIT_TREES = "Spirit Tree";
+	static final String OBELISKS = "Obelisk";
+	static final String LOVAKENGJ_MINECARTS = "Lovakengj Minecart";
+	static final String QUETZALS = "Quetzal";
+	static final String GNOME_GLIDERS = "Gnome Glider";
 
 	private static final Map<String, String> RESOURCES;
 	static
 	{
 		final Map<String, String> m = new LinkedHashMap<>();
 		m.put(BANKS, "/com/gpsbookmark/pois/banks.json");
+		m.put(FAIRY_RINGS, "/com/gpsbookmark/pois/fairy-rings.json");
+		m.put(SPIRIT_TREES, "/com/gpsbookmark/pois/spirit-trees.json");
+		m.put(OBELISKS, "/com/gpsbookmark/pois/obelisks.json");
+		m.put(LOVAKENGJ_MINECARTS, "/com/gpsbookmark/pois/lovakengj-minecarts.json");
+		m.put(QUETZALS, "/com/gpsbookmark/pois/quetzals.json");
+		m.put(GNOME_GLIDERS, "/com/gpsbookmark/pois/gnome-gliders.json");
 		RESOURCES = Collections.unmodifiableMap(m);
 	}
 

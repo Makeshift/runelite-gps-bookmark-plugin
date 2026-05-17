@@ -1,0 +1,34 @@
+{
+  "name": "spirit-trees",
+  "outputResourcePath": "com/gpsbookmark/pois/spirit-trees.json",
+  "comment": "Spirit tree cache definitions are 26259, 26260, 26261, 26262, 26263, 35949, 35950, 49595, and 49596, but current static cache regions do not place them; manual points mirror the wiki map locations.",
+  "namePatterns": [],
+  "requiredActions": [],
+  "forceIncludeIds": [
+    26259,
+    26260,
+    26261,
+    26262,
+    26263,
+    35949,
+    35950,
+    49595,
+    49596
+  ],
+  "excludeIds": [],
+  "manualPoints": [
+    { "name": "Spirit tree - Tree Gnome Village", "x": 2539, "y": 3166, "plane": 0 },
+    { "name": "Spirit tree - Gnome Stronghold", "x": 2460, "y": 3446, "plane": 0 },
+    { "name": "Spirit tree - Battlefield of Khazard", "x": 2555, "y": 3259, "plane": 0 },
+    { "name": "Spirit tree - Grand Exchange", "x": 3185, "y": 3510, "plane": 0 },
+    { "name": "Spirit tree - Feldip Hills", "x": 2486, "y": 2850, "plane": 0 },
+    { "name": "Spirit tree - Poison Waste", "x": 2339, "y": 3111, "plane": 0 },
+    { "name": "Spirit tree - Prifddinas", "x": 3275, "y": 6124, "plane": 0 },
+    { "name": "Spirit tree - Laguna Aurorae", "x": 1202, "y": 2786, "plane": 0 },
+    { "name": "Spirit tree - Etceteria", "x": 2613, "y": 3858, "plane": 0 },
+    { "name": "Spirit tree - Port Sarim", "x": 3060, "y": 3258, "plane": 0 },
+    { "name": "Spirit tree - Brimhaven", "x": 2802, "y": 3203, "plane": 0 },
+    { "name": "Spirit tree - Hosidius", "x": 1693, "y": 3542, "plane": 0 },
+    { "name": "Spirit tree - Farming Guild", "x": 1253, "y": 3750, "plane": 0 }
+  ]
+}

@@ -44,4 +44,26 @@ public class PoiDumpConfig
 
 	/** Object IDs to exclude even if they would otherwise match. */
 	public List<Integer> excludeIds = new ArrayList<>();
+
+	/**
+	 * Region IDs to exclude even if a matched object is placed there.
+	 * Useful for construction/instance copies that share the same object ID
+	 * as overworld transport nodes.
+	 */
+	public List<Integer> excludeRegions = new ArrayList<>();
+
+	/**
+	 * Extra points to include when the cache exposes the transport definition
+	 * but not static world placements for every wiki-listed destination.
+	 */
+	public List<ManualPoint> manualPoints = new ArrayList<>();
+
+	public static class ManualPoint
+	{
+		public int x;
+		public int y;
+		public int plane;
+		public int id = -1;
+		public String name;
+	}
 }
